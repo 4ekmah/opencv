@@ -50,50 +50,10 @@
 #undef min
 #undef max
 #include <iostream>
-#include <fstream>
 
 /****************************************************************************************\
 *                                      Image Codecs                                      *
 \****************************************************************************************/
-namespace {
-
-class ByteStreamBuffer: public std::streambuf
-{
-public:
-    ByteStreamBuffer(char* base, size_t length)
-    {
-        setg(base, base, base + length);
-    }
-
-protected:
-    virtual pos_type seekoff( off_type offset,
-                              std::ios_base::seekdir dir,
-                              std::ios_base::openmode )
-    {
-        char* whence = eback();
-        if (dir == std::ios_base::cur)
-        {
-            whence = gptr();
-        }
-        else if (dir == std::ios_base::end)
-        {
-            whence = egptr();
-        }
-        char* to = whence + offset;
-
-        // check limits
-        if (to >= eback() && to <= egptr())
-        {
-            setg(eback(), to, egptr());
-            return gptr() - eback();
-        }
-
-        return -1;
-    }
-};
-
-}
-
 namespace cv
 {
 
@@ -272,8 +232,23 @@ static ImageEncoder findEncoder( const String& _ext )
 
 enum { LOAD_CVMAT=0, LOAD_IMAGE=1, LOAD_MAT=2 };
 
-static void ExifTransform(int orientation, Mat& img)
+static void ApplyExifOrientation(const String& filename, Mat& img)
 {
+    int orientation = IMAGE_ORIENTATION_TL;
+
+    if (filename.size() > 0)
+    {
+        ExifReader reader( filename );
+        if( reader.parse() )
+        {
+            ExifEntry_t entry = reader.getTag( ORIENTATION );
+            if (entry.tag != INVALID_TAG)
+            {
+                orientation = entry.field_u16; //orientation is unsigned short, so check field_u16
+            }
+        }
+    }
+
     switch( orientation )
     {
         case    IMAGE_ORIENTATION_TL: //0th row == visual top, 0th column == visual left-hand side
@@ -307,50 +282,6 @@ static void ExifTransform(int orientation, Mat& img)
             //by default the image read has normal (JPEG_ORIENTATION_TL) orientation
             break;
     }
-}
-
-static void ApplyExifOrientation(const String& filename, Mat& img)
-{
-    int orientation = IMAGE_ORIENTATION_TL;
-
-    if (filename.size() > 0)
-    {
-        std::ifstream stream( filename.c_str(), std::ios_base::in | std::ios_base::binary );
-        ExifReader reader( stream );
-        if( reader.parse() )
-        {
-            ExifEntry_t entry = reader.getTag( ORIENTATION );
-            if (entry.tag != INVALID_TAG)
-            {
-                orientation = entry.field_u16; //orientation is unsigned short, so check field_u16
-            }
-        }
-        stream.close();
-    }
-
-    ExifTransform(orientation, img);
-}
-
-static void ApplyExifOrientation(const Mat& buf, Mat& img)
-{
-    int orientation = IMAGE_ORIENTATION_TL;
-
-    if( buf.isContinuous() )
-    {
-        ByteStreamBuffer bsb( reinterpret_cast<char*>(buf.data), buf.total() * buf.elemSize() );
-        std::istream stream( &bsb );
-        ExifReader reader( stream );
-        if( reader.parse() )
-        {
-            ExifEntry_t entry = reader.getTag( ORIENTATION );
-            if (entry.tag != INVALID_TAG)
-            {
-                orientation = entry.field_u16; //orientation is unsigned short, so check field_u16
-            }
-        }
-    }
-
-    ExifTransform(orientation, img);
 }
 
 /**
@@ -563,7 +494,7 @@ Mat imread( const String& filename, int flags )
     imread_( filename, flags, LOAD_MAT, &img );
 
     /// optionally rotate the data if EXIF' orientation flag says so
-    if( !img.empty() && (flags & IMREAD_IGNORE_ORIENTATION) == 0 && flags != IMREAD_UNCHANGED )
+    if( (flags & IMREAD_IGNORE_ORIENTATION) == 0 && flags != IMREAD_UNCHANGED )
     {
         ApplyExifOrientation(filename, img);
     }
@@ -727,13 +658,6 @@ Mat imdecode( InputArray _buf, int flags )
 {
     Mat buf = _buf.getMat(), img;
     imdecode_( buf, flags, LOAD_MAT, &img );
-
-    /// optionally rotate the data if EXIF' orientation flag says so
-    if( !img.empty() && (flags & IMREAD_IGNORE_ORIENTATION) == 0 && flags != IMREAD_UNCHANGED )
-    {
-        ApplyExifOrientation(buf, img);
-    }
-
     return img;
 }
 
@@ -742,13 +666,6 @@ Mat imdecode( InputArray _buf, int flags, Mat* dst )
     Mat buf = _buf.getMat(), img;
     dst = dst ? dst : &img;
     imdecode_( buf, flags, LOAD_MAT, dst );
-
-    /// optionally rotate the data if EXIF' orientation flag says so
-    if( !dst->empty() && (flags & IMREAD_IGNORE_ORIENTATION) == 0 && flags != IMREAD_UNCHANGED )
-    {
-        ApplyExifOrientation(buf, *dst);
-    }
-
     return *dst;
 }
 

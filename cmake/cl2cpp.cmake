@@ -9,11 +9,17 @@ if (NOT cl_list)
   message(FATAL_ERROR "Can't find OpenCL kernels in directory: ${CL_DIR}")
 endif()
 
-string(REGEX REPLACE "\\.cpp$" ".hpp" OUTPUT_HPP "${OUTPUT}")
+string(REPLACE ".cpp" ".hpp" OUTPUT_HPP "${OUTPUT}")
 get_filename_component(OUTPUT_HPP_NAME "${OUTPUT_HPP}" NAME)
 
-set(nested_namespace_start "namespace ${MODULE_NAME}\n{")
-set(nested_namespace_end "}")
+if("${MODULE_NAME}" STREQUAL "ocl")
+    set(nested_namespace_start "")
+    set(nested_namespace_end "")
+else()
+    set(new_mode ON)
+    set(nested_namespace_start "namespace ${MODULE_NAME}\n{")
+    set(nested_namespace_end "}")
+endif()
 
 set(STR_CPP "// This file is auto-generated. Do not edit!
 
@@ -28,8 +34,6 @@ namespace cv
 namespace ocl
 {
 ${nested_namespace_start}
-
-static const char* const moduleName = \"${MODULE_NAME}\";
 
 ")
 
@@ -72,15 +76,19 @@ foreach(cl ${cl_list})
 
   string(MD5 hash "${lines}")
 
-  set(STR_CPP_DECL "struct cv::ocl::internal::ProgramEntry ${cl_filename}_oclsrc={moduleName, \"${cl_filename}\",\n\"${lines}, \"${hash}\", NULL};\n")
-  set(STR_HPP_DECL "extern struct cv::ocl::internal::ProgramEntry ${cl_filename}_oclsrc;\n")
+  set(STR_CPP_DECL "const struct ProgramEntry ${cl_filename}={\"${cl_filename}\",\n\"${lines}, \"${hash}\"};\n")
+  set(STR_HPP_DECL "extern const struct ProgramEntry ${cl_filename};\n")
+  if(new_mode)
+    set(STR_CPP_DECL "${STR_CPP_DECL}ProgramSource ${cl_filename}_oclsrc(${cl_filename}.programStr);\n")
+    set(STR_HPP_DECL "${STR_HPP_DECL}extern ProgramSource ${cl_filename}_oclsrc;\n")
+  endif()
 
   set(STR_CPP "${STR_CPP}${STR_CPP_DECL}")
   set(STR_HPP "${STR_HPP}${STR_HPP_DECL}")
 endforeach()
 
-set(STR_CPP "${STR_CPP}\n${nested_namespace_end}}}\n#endif\n")
-set(STR_HPP "${STR_HPP}\n${nested_namespace_end}}}\n#endif\n")
+set(STR_CPP "${STR_CPP}}\n${nested_namespace_end}}\n#endif\n")
+set(STR_HPP "${STR_HPP}}\n${nested_namespace_end}}\n#endif\n")
 
 file(WRITE "${OUTPUT}" "${STR_CPP}")
 
@@ -88,7 +96,7 @@ if(EXISTS "${OUTPUT_HPP}")
   file(READ "${OUTPUT_HPP}" hpp_lines)
 endif()
 if("${hpp_lines}" STREQUAL "${STR_HPP}")
-  message(STATUS "${OUTPUT_HPP} contains the same content")
+  message(STATUS "${OUTPUT_HPP} contains same content")
 else()
   file(WRITE "${OUTPUT_HPP}" "${STR_HPP}")
 endif()

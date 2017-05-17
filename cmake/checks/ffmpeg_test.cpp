@@ -1,5 +1,3 @@
-#define __STDC_CONSTANT_MACROS
-
 #include <stdlib.h>
 
 extern "C" {

@@ -251,23 +251,20 @@ namespace cvtest
 
     int CV_BilateralFilterTest::validate_test_results(int test_case_index)
     {
-        double eps = (_src.depth() < CV_32F)?1:5e-3;
-        double e;
+        static const double eps = 4;
+
         Mat reference_dst, reference_src;
         if (_src.depth() == CV_32F)
-        {
             reference_bilateral_filter(_src, reference_dst, _d, _sigma_color, _sigma_space);
-            e = cvtest::norm(reference_dst, _parallel_dst, NORM_INF|NORM_RELATIVE);
-        }
         else
         {
             int type = _src.type();
             _src.convertTo(reference_src, CV_32F);
             reference_bilateral_filter(reference_src, reference_dst, _d, _sigma_color, _sigma_space);
             reference_dst.convertTo(reference_dst, type);
-            e = cvtest::norm(reference_dst, _parallel_dst, NORM_INF);
         }
 
+        double e = cvtest::norm(reference_dst, _parallel_dst, NORM_L2);
         if (e > eps)
         {
             ts->printf(cvtest::TS::CONSOLE, "actual error: %g, expected: %g", e, eps);

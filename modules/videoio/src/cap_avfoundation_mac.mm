@@ -293,7 +293,7 @@ void CvCaptureCAM::stopCaptureDevice() {
 
     [mCaptureSession release];
     [mCaptureDeviceInput release];
-    // [mCaptureDevice release]; fix #7833
+    [mCaptureDevice release];
 
     [mCaptureVideoDataOutput release];
     [mCapture release];
@@ -305,8 +305,7 @@ int CvCaptureCAM::startCaptureDevice(int cameraNum) {
     NSAutoreleasePool *localpool = [[NSAutoreleasePool alloc] init];
 
     // get capture device
-    NSArray *devices = [[AVCaptureDevice devicesWithMediaType: AVMediaTypeVideo]
-            arrayByAddingObjectsFromArray:[AVCaptureDevice devicesWithMediaType:AVMediaTypeMuxed]];
+    NSArray *devices = [AVCaptureDevice devicesWithMediaType: AVMediaTypeVideo];
 
     if ( devices.count == 0 ) {
         fprintf(stderr, "OpenCV: AVFoundation didn't find any attached Video Input Devices!\n");

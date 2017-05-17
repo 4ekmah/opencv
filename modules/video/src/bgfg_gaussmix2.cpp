@@ -693,16 +693,11 @@ public:
                 //go through all modes
                 //////
 
-                // Renormalize weights. In the special case that the pixel does
-                // not agree with any modes, set weights to zero (a new mode will be added below).
-                float invWeight = 0.f;
-                if (std::abs(totalWeight) > FLT_EPSILON) {
-                    invWeight = 1.f/totalWeight;
-                }
-
+                //renormalize weights
+                totalWeight = 1.f/totalWeight;
                 for( int mode = 0; mode < nmodes; mode++ )
                 {
-                    gmm[mode].weight *= invWeight;
+                    gmm[mode].weight *= totalWeight;
                 }
 
                 //make new mode if needed and exit
@@ -905,10 +900,7 @@ void BackgroundSubtractorMOG2Impl::getBackgroundImage_intern(OutputArray backgro
                 if(totalWeight > backgroundRatio)
                     break;
             }
-            float invWeight = 0.f;
-            if (std::abs(totalWeight) > FLT_EPSILON) {
-                invWeight = 1.f/totalWeight;
-            }
+            float invWeight = 1.f/totalWeight;
 
             meanBackground.at<Vec<T,CN> >(row, col) = Vec<T,CN>(meanVal * invWeight);
             meanVal = 0.f;

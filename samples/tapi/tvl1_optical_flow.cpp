@@ -105,7 +105,7 @@ int main(int argc, const char* argv[])
     string fname1 = cmd.get<string>("r");
     string vdofile = cmd.get<string>("v");
     string outpath = cmd.get<string>("o");
-    bool useCPU = cmd.get<bool>("m");
+    bool useCPU = cmd.get<bool>("s");
     bool useCamera = cmd.get<bool>("c");
     int inputName = cmd.get<int>("c");
 

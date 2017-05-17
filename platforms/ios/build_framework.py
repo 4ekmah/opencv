@@ -28,7 +28,7 @@ Adding --dynamic parameter will build opencv2.framework as App Store dynamic fra
 """
 
 from __future__ import print_function
-import glob, re, os, os.path, shutil, string, sys, argparse, traceback, multiprocessing
+import glob, re, os, os.path, shutil, string, sys, argparse, traceback
 from subprocess import check_call, check_output, CalledProcessError
 
 def execute(cmd, cwd = None):
@@ -122,32 +122,37 @@ class Builder:
 
     def getCMakeArgs(self, arch, target):
 
-        args = [
-            "cmake",
-            "-GXcode",
-            "-DAPPLE_FRAMEWORK=ON",
-            "-DCMAKE_INSTALL_PREFIX=install",
-            "-DCMAKE_BUILD_TYPE=Release",
-        ] + ([
-            "-DBUILD_SHARED_LIBS=ON",
-            "-DCMAKE_MACOSX_BUNDLE=ON",
-            "-DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO",
-        ] if self.dynamic else [])
+        if self.dynamic:
+            args = [
+                "cmake",
+                "-GXcode",
+                "-DAPPLE_FRAMEWORK=ON",
+                "-DCMAKE_INSTALL_PREFIX=install",
+                "-DCMAKE_BUILD_TYPE=Release",
+                "-DBUILD_SHARED_LIBS=ON",
+                "-DCMAKE_MACOSX_BUNDLE=ON",
+                "-DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO",
+            ]
+        else:
+            args = [
+                "cmake",
+                "-GXcode",
+                "-DAPPLE_FRAMEWORK=ON",
+                "-DCMAKE_INSTALL_PREFIX=install",
+                "-DCMAKE_BUILD_TYPE=Release",
+            ]
 
         if len(self.exclude) > 0:
-            args += ["-DBUILD_opencv_world=OFF"] if not self.dynamic else []
-            args += ["-DBUILD_opencv_%s=OFF" % m for m in self.exclude]
+            args += ["-DBUILD_opencv_world=OFF"]
+            args += ("-DBUILD_opencv_%s=OFF" % m for m in self.exclude)
 
         return args
 
     def getBuildCommand(self, archs, target):
 
-        buildcmd = [
-            "xcodebuild",
-        ]
-
         if self.dynamic:
-            buildcmd += [
+            buildcmd = [
+                "xcodebuild",
                 "IPHONEOS_DEPLOYMENT_TARGET=8.0",
                 "ONLY_ACTIVE_ARCH=NO",
             ]
@@ -155,19 +160,25 @@ class Builder:
             for arch in archs:
                 buildcmd.append("-arch")
                 buildcmd.append(arch.lower())
-        else:
-            arch = ";".join(archs)
-            buildcmd += [
-                "IPHONEOS_DEPLOYMENT_TARGET=6.0",
-                "ARCHS=%s" % arch,
-            ]
 
-        buildcmd += [
+            buildcmd += [
                 "-sdk", target.lower(),
                 "-configuration", "Release",
                 "-parallelizeTargets",
-                "-jobs", str(multiprocessing.cpu_count()),
-            ] + (["-target","ALL_BUILD"] if self.dynamic else [])
+                "-jobs", "4",
+                "-target","ALL_BUILD",
+            ]
+        else:
+            arch = ";".join(archs)
+            buildcmd = [
+                "xcodebuild",
+                "IPHONEOS_DEPLOYMENT_TARGET=6.0",
+                "ARCHS=%s" % arch,
+                "-sdk", target.lower(),
+                "-configuration", "Release",
+                "-parallelizeTargets",
+                "-jobs", "4"
+            ]
 
         return buildcmd
 

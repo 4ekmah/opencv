@@ -551,11 +551,11 @@ CirclesGridFinderParameters::CirclesGridFinderParameters()
   keypointScale = 1;
 
   minGraphConfidence = 9;
-  vertexGain = 1;
-  vertexPenalty = -0.6f;
+  vertexGain = 2;
+  vertexPenalty = -5;
   edgeGain = 1;
-  edgePenalty = -0.6f;
-  existingVertexGain = 10000;
+  edgePenalty = -5;
+  existingVertexGain = 0;
 
   minRNGEdgeSwitchDist = 5.f;
   gridType = SYMMETRIC_GRID;
@@ -839,11 +839,7 @@ Mat CirclesGridFinder::rectifyGrid(Size detectedGridSize, const std::vector<Poin
   //Mat H = findHomography( Mat( corners ), Mat( dstPoints ) );
 
   if (H.empty())
-  {
       H = Mat::zeros(3, 3, CV_64FC1);
-      warpedKeypoints.clear();
-      return H;
-  }
 
   std::vector<Point2f> srcKeypoints;
   for (size_t i = 0; i < keypoints.size(); i++)

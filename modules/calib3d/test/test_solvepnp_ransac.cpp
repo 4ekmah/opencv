@@ -57,7 +57,6 @@ public:
         eps[SOLVEPNP_ITERATIVE] = 1.0e-2;
         eps[SOLVEPNP_EPNP] = 1.0e-2;
         eps[SOLVEPNP_P3P] = 1.0e-2;
-        eps[SOLVEPNP_AP3P] = 1.0e-2;
         eps[SOLVEPNP_DLS] = 1.0e-2;
         eps[SOLVEPNP_UPNP] = 1.0e-2;
         totalTestsCount = 10;
@@ -162,7 +161,7 @@ protected:
         points.resize(pointsCount);
         generate3DPointCloud(points);
 
-        const int methodsCount = 6;
+        const int methodsCount = 5;
         RNG rng = ts->get_rng();
 
 
@@ -190,7 +189,7 @@ protected:
             }
         }
     }
-    double eps[6];
+    double eps[5];
     int totalTestsCount;
 };
 
@@ -202,7 +201,6 @@ public:
         eps[SOLVEPNP_ITERATIVE] = 1.0e-6;
         eps[SOLVEPNP_EPNP] = 1.0e-6;
         eps[SOLVEPNP_P3P] = 1.0e-4;
-        eps[SOLVEPNP_AP3P] = 1.0e-4;
         eps[SOLVEPNP_DLS] = 1.0e-4;
         eps[SOLVEPNP_UPNP] = 1.0e-4;
         totalTestsCount = 1000;
@@ -224,7 +222,7 @@ protected:
         generatePose(trueRvec, trueTvec, rng);
 
         std::vector<Point3f> opoints;
-        if (method == 2 || method == 5)
+        if (method == 2)
         {
             opoints = std::vector<Point3f>(points.begin(), points.begin()+4);
         }

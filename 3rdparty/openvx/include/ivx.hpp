@@ -32,12 +32,6 @@ static const vx_enum VX_INTERPOLATION_NEAREST_NEIGHBOR = VX_INTERPOLATION_TYPE_N
 static const vx_enum VX_BORDER_CONSTANT = VX_BORDER_MODE_CONSTANT;
 static const vx_enum VX_BORDER_REPLICATE = VX_BORDER_MODE_REPLICATE;
 
-#else
-
-    #ifdef IVX_RENAMED_REFS
-        static const vx_enum VX_REF_ATTRIBUTE_TYPE = VX_REFERENCE_TYPE;
-    #endif
-
 #endif
 
 #ifndef IVX_USE_CXX98
@@ -2508,10 +2502,10 @@ public:
     {
         if (!areTypesCompatible(TypeToEnum<T>::value, dataType()))
             throw WrapperError(std::string(__func__) + "(): destination type is wrong");
-        if (data.size()*sizeof(T) != size())
+        if (data.size() != size())
         {
             if (data.size() == 0)
-                data.resize(size()/sizeof(T));
+                data.resize(size());
             else
                 throw WrapperError(std::string(__func__) + "(): destination size is wrong");
         }
@@ -2522,7 +2516,7 @@ public:
     {
         if (!areTypesCompatible(TypeToEnum<T>::value, dataType()))
             throw WrapperError(std::string(__func__) + "(): source type is wrong");
-        if (data.size()*sizeof(T) != size()) throw WrapperError(std::string(__func__) + "(): source size is wrong");
+        if (data.size() != size()) throw WrapperError(std::string(__func__) + "(): source size is wrong");
         copyFrom(&data[0]);
     }
 
@@ -2670,10 +2664,10 @@ public:
     {
         if (!areTypesCompatible(TypeToEnum<T>::value, dataType()))
             throw WrapperError(std::string(__func__) + "(): destination type is wrong");
-        if (data.size()*sizeof(T) != size())
+        if (data.size() != size())
         {
             if (data.size() == 0)
-                data.resize(size()/sizeof(T));
+                data.resize(size());
             else
                 throw WrapperError(std::string(__func__) + "(): destination size is wrong");
         }
@@ -2684,7 +2678,7 @@ public:
     {
         if (!areTypesCompatible(TypeToEnum<T>::value, dataType()))
             throw WrapperError(std::string(__func__) + "(): source type is wrong");
-        if (data.size()*sizeof(T) != size()) throw WrapperError(std::string(__func__) + "(): source size is wrong");
+        if (data.size() != size()) throw WrapperError(std::string(__func__) + "(): source size is wrong");
         copyFrom(&data[0]);
     }
 

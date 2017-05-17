@@ -30,8 +30,6 @@
 #ifndef OPENCV_FLANN_AUTOTUNED_INDEX_H_
 #define OPENCV_FLANN_AUTOTUNED_INDEX_H_
 
-#include <sstream>
-
 #include "general.h"
 #include "nn_index.h"
 #include "ground_truth.h"

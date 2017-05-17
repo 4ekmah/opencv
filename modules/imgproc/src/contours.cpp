@@ -528,7 +528,6 @@ cvSubstituteContour( CvContourScanner scanner, CvSeq * new_contour )
     }
 }
 
-static const int MAX_SIZE = 16;
 
 /*
     marks domain border with +/-<constant> and stores the contour into CvSeq.
@@ -545,7 +544,7 @@ icvFetchContour( schar                  *ptr,
                  int    _method )
 {
     const schar     nbd = 2;
-    int             deltas[MAX_SIZE];
+    int             deltas[16];
     CvSeqWriter     writer;
     schar           *i0 = ptr, *i1, *i3, *i4 = 0;
     int             prev_s = -1, s, s_end;
@@ -589,9 +588,8 @@ icvFetchContour( schar                  *ptr,
         for( ;; )
         {
             s_end = s;
-            s = std::min(s, MAX_SIZE - 1);
 
-            while( s < MAX_SIZE - 1 )
+            for( ;; )
             {
                 i4 = i3 + deltas[++s];
                 if( *i4 != 0 )
@@ -656,8 +654,8 @@ icvFetchContour( schar                  *ptr,
 static int
 icvTraceContour( schar *ptr, int step, schar *stop_ptr, int is_hole )
 {
-    int deltas[MAX_SIZE];
-    schar *i0 = ptr, *i1, *i3, *i4 = NULL;
+    int deltas[16];
+    schar *i0 = ptr, *i1, *i3, *i4;
     int s, s_end;
 
     /* initialize local state */
@@ -684,8 +682,7 @@ icvTraceContour( schar *ptr, int step, schar *stop_ptr, int is_hole )
         for( ;; )
         {
 
-            s = std::min(s, MAX_SIZE - 1);
-            while( s < MAX_SIZE - 1 )
+            for( ;; )
             {
                 i4 = i3 + deltas[++s];
                 if( *i4 != 0 )
@@ -712,9 +709,9 @@ icvFetchContourEx( schar*               ptr,
                    int                  nbd,
                    CvRect*              _rect )
 {
-    int         deltas[MAX_SIZE];
+    int         deltas[16];
     CvSeqWriter writer;
-    schar        *i0 = ptr, *i1, *i3, *i4 = NULL;
+    schar        *i0 = ptr, *i1, *i3, *i4;
     CvRect      rect;
     int         prev_s = -1, s, s_end;
     int         method = _method - 1;
@@ -762,9 +759,8 @@ icvFetchContourEx( schar*               ptr,
         for( ;; )
         {
             s_end = s;
-            s = std::min(s, MAX_SIZE - 1);
 
-            while( s < MAX_SIZE - 1 )
+            for( ;; )
             {
                 i4 = i3 + deltas[++s];
                 if( *i4 != 0 )
@@ -837,8 +833,8 @@ icvFetchContourEx( schar*               ptr,
 static int
 icvTraceContour_32s( int *ptr, int step, int *stop_ptr, int is_hole )
 {
-    int deltas[MAX_SIZE];
-    int *i0 = ptr, *i1, *i3, *i4 = NULL;
+    int deltas[16];
+    int *i0 = ptr, *i1, *i3, *i4;
     int s, s_end;
     const int   right_flag = INT_MIN;
     const int   new_flag = (int)((unsigned)INT_MIN >> 1);
@@ -867,9 +863,8 @@ icvTraceContour_32s( int *ptr, int step, int *stop_ptr, int is_hole )
         for( ;; )
         {
             s_end = s;
-            s = std::min(s, MAX_SIZE - 1);
 
-            while( s < MAX_SIZE - 1 )
+            for( ;; )
             {
                 i4 = i3 + deltas[++s];
                 if( (*i4 & value_mask) == ccomp_val )
@@ -895,7 +890,7 @@ icvFetchContourEx_32s( int*                 ptr,
                        int                  _method,
                        CvRect*              _rect )
 {
-    int         deltas[MAX_SIZE];
+    int         deltas[16];
     CvSeqWriter writer;
     int        *i0 = ptr, *i1, *i3, *i4;
     CvRect      rect;
@@ -930,7 +925,7 @@ icvFetchContourEx_32s( int*                 ptr,
         s = (s - 1) & 7;
         i1 = i0 + deltas[s];
     }
-    while( (*i1 & value_mask) != ccomp_val && s != s_end && ( s < MAX_SIZE - 1 ) );
+    while( (*i1 & value_mask) != ccomp_val && s != s_end );
 
     if( s == s_end )            /* single pixel domain */
     {
@@ -950,11 +945,12 @@ icvFetchContourEx_32s( int*                 ptr,
         {
             s_end = s;
 
-            do
+            for( ;; )
             {
                 i4 = i3 + deltas[++s];
+                if( (*i4 & value_mask) == ccomp_val )
+                    break;
             }
-            while( (*i4 & value_mask) != ccomp_val && ( s < MAX_SIZE - 1 ) );
             s &= 7;
 
             /* check "right" bound */
