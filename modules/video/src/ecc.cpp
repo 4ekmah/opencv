@@ -630,3 +630,828 @@ double cv::findTransformECC(InputArray templateImage, InputArray inputImage, Inp
 }
 
 /* End of file. */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//DUBUG: patch starts here:
+
+inline void reinterpret(Mat& mat, int newdepth) {
+    mat.flags = (mat.flags & ~CV_MAT_DEPTH_MASK) | newdepth;
+}
+
+template<int Start, int End, class F>
+constexpr void constexprFor(F&& fVal) {
+    if constexpr (Start < End) {
+        fVal(Start);
+        constexprFor<Start + 1, End>(std::forward<F>(fVal));
+    }
+}
+
+template<int StartY, int EndY, int StartX, int EndX, class F>
+constexpr void constexprForUpperTriangleBase(F&& fVal) {
+    if constexpr (StartY < EndY) {
+        if constexpr (StartX < EndX) {
+            fVal(StartY, StartX);
+            constexprForUpperTriangleBase<StartY, EndY, StartX + 1, EndX>(std::forward<F>(fVal));
+        } else {
+            constexprForUpperTriangleBase<StartY + 1, EndY, StartY + 1, EndX>(std::forward<F>(fVal));
+        }
+    }
+}
+
+template<int MatrSize, class F>
+constexpr void constexprForUpperTriangle(F&& fVal) {
+    constexprForUpperTriangleBase<0, MatrSize, 0, MatrSize>(fVal);
+}
+
+template<int motionType>
+constexpr int hessianRowStart(int row) {
+    constexpr int NPARAMS = motionType == MOTION_HOMOGRAPHY ? 8 : 3;
+    if constexpr (motionType == MOTION_HOMOGRAPHY) {
+        constexpr std::array<int, NPARAMS> ROWSTART = {0, 8, 15, 21, 26, 30, 33, 35};
+        return ROWSTART[row];
+    } else {
+        constexpr std::array<int, NPARAMS> ROWSTART = {0, 3, 5};
+        return ROWSTART[row];
+    }
+}
+
+template<int motionType, int NPARAMS, typename elemtype>
+inline void hessianTailHandler(int row,
+                               int startx,
+                               int wr,
+                               int hs,
+                               int ws,
+                               const elemtype* samplePtr0,
+                               const elemtype* refPtr,
+                               float numeratorX0,
+                               float numeratorY0,
+                               float denominator0,
+                               float a00,
+                               float a10,
+                               float a20,
+                               double& sampSum,
+                               double& sampSqSum,
+                               double& refSum,
+                               double& refSqSum,
+                               int& nz,
+                               double& sampMaskedSum,
+                               double& refMaskedSum,
+                               int& nzMasked,
+                               std::array<float, (NPARAMS * NPARAMS + NPARAMS) / 2>& hessPcache,
+                               std::array<float, NPARAMS>& iprojCache,
+                               std::array<float, NPARAMS>& tprojCache,
+                               std::array<float, NPARAMS>& projSubCache,
+                               double& correlationVal) {
+    for (int col = startx; col < wr; col++) {
+        float sx = (numeratorX0 + a00 * col);
+        float sy = (numeratorY0 + a10 * col);
+        float denominator = 0;
+        if constexpr (motionType == MOTION_HOMOGRAPHY) {
+            denominator = 1.f / (col * a20 + denominator0);
+            sx *= denominator;
+            sy *= denominator;
+        }
+        unsigned int ix = saturate_cast<unsigned>(sx);
+        unsigned int iy = saturate_cast<unsigned>(sy);
+        if ((static_cast<int>(ix < (unsigned int)ws) & static_cast<int>(iy < (unsigned int)hs)) != 0) {
+            const elemtype* samplePtr = samplePtr0 + iy * (ws * 4) + ix * 4;
+            float sampleVal = samplePtr[0];
+            float refVal = refPtr[2 * col];
+            sampSum += sampleVal;
+            sampSqSum += sampleVal * sampleVal;
+            refSum += refVal;
+            refSqSum += refVal * refVal;
+            nz++;
+            float fVal = float(samplePtr[3]);
+            float fValRef = float(refPtr[2 * col + 1]);
+            fVal = fVal == 0.f ? 0.f : 1.f;
+            fValRef = fValRef == 0.f ? 0.f : 1.f;
+            fVal *= fValRef;
+            sampleVal *= fVal;
+            refVal *= fVal;
+            nzMasked += fVal;
+            sampMaskedSum += sampleVal;
+            refMaskedSum += refVal;
+            std::array<float, NPARAMS> jac;
+            if constexpr (motionType == MOTION_HOMOGRAPHY) {
+                float gx = fVal * float(samplePtr[1]) * denominator;
+                float gy = fVal * float(samplePtr[2]) * denominator;
+                float gz = -(gx * sx + gy * sy);
+                jac = std::array<float, NPARAMS>{gx * col, gy * col, gz * col, gx * row, gy * row, gz * row, gx, gy};
+            } else {  // if constexpr (motionType == MOTION_EUCLIDEAN)MOTION_EUCLIDEAN
+                float gx = fVal * samplePtr[1], gy = fVal * samplePtr[2];
+                float hatX = -col * a10 - row * a00;
+                float hatY = col * a00 - row * a10;
+                float gz = gx * hatX + gy * hatY;
+                jac = std::array<float, NPARAMS>{gz, gx, gy};
+            }
+            constexprForUpperTriangle<NPARAMS>([&](int row, int col) {
+                hessPcache[hessianRowStart<motionType>(row) + (col - row)] += jac[row] * jac[col];
+            });
+            constexprFor<0, NPARAMS>([&](int elem) {
+                iprojCache[elem] += jac[elem] * sampleVal;
+                tprojCache[elem] += jac[elem] * refVal;
+                projSubCache[elem] += jac[elem] * fVal;
+            });
+            correlationVal += sampleVal * refVal;
+        }
+    }
+}
+
+template<int motionType, typename elemtype>
+double imageHessianProjECC(const Mat& map,
+                           const Mat& sampleWithGrad,
+                           const Mat& ref,
+                           double& sampSum,
+                           double& sampSqSum,
+                           double& refSum,
+                           double& refSqSum,
+                           int& nz,
+                           Mat& hessian,
+                           Mat& sampleProj,
+                           Mat& refProj,
+                           int deltaY) {
+    static_assert(std::is_same<float, elemtype>::value);
+    constexpr int NPARAMS = motionType == MOTION_HOMOGRAPHY ? 8 : 3;
+
+    CV_Assert(map.type() == CV_32F);
+    CV_Assert(hessian.type() == CV_32F && sampleProj.type() == CV_32F && refProj.type() == CV_32F);
+    if (sampleProj.size() != Size(1, NPARAMS) || refProj.size() != Size(1, NPARAMS)) {
+        CV_Error(Error::BadImageSize, format("imageHessianProjECC: Wrong sample projection/reference projection size. 1x%d expected", NPARAMS));
+    }
+    if (hessian.size() != Size(NPARAMS, NPARAMS)) {
+        CV_Error(Error::BadImageSize, format("imageHessianProjECC: Wrong hessian size. %dx%d expected", NPARAMS, NPARAMS));
+    }
+    if (!map.isContinuous()) {
+        CV_Error(Error::BadStep, "imageHessianProjECC: Map should be continuous");
+    }
+    if (std::is_same<float, elemtype>::value) {
+        CV_Assert(sampleWithGrad.type() == CV_32FC4 && ref.type() == CV_32FC2);
+    }
+
+    int hr = ref.rows;
+    int wr = ref.cols;
+    int hs = sampleWithGrad.rows;
+    int ws = sampleWithGrad.cols;
+
+    hessian = Mat::zeros(hessian.size(), hessian.type());
+    sampleProj = Mat::zeros(sampleProj.size(), sampleProj.type());
+    refProj = Mat::zeros(refProj.size(), refProj.type());
+
+    const int MAX_STRIPES = 8;
+    int stripesAmount = std::min(MAX_STRIPES, hr / deltaY);
+    std::vector<std::vector<double>> hessPs(stripesAmount, std::vector<double>(NPARAMS * NPARAMS, 0.));
+    std::vector<std::vector<double>> iprojs(stripesAmount, std::vector<double>(NPARAMS, 0.));
+    std::vector<std::vector<double>> tprojs(stripesAmount, std::vector<double>(NPARAMS, 0.));
+    std::vector<std::vector<double>> projSubs(stripesAmount, std::vector<double>(NPARAMS, 0.));
+    std::vector<double> correlations(stripesAmount, 0.);
+
+    // There is sophisticated story with masked and unmasked sums. We don't understand it for well,
+    // but for some reason, in case, we are using masks algorithm becomes unstable if we apply masks
+    // on images for calculationg all sums. Working solution is to use masks for hessians, projections,
+    // correlations and not to use masks for simple statistics, like mean and standart deviation. In
+    // the same time we need to calculate masked versions of mean and number of used pixels to
+    // calculate correlation. So, we need pairs, like sampSums and sampMaskedSums or nzs and nzsMasked.
+
+    std::vector<double> sampSums(stripesAmount, 0);
+    std::vector<double> sampSqSums(stripesAmount, 0);
+    std::vector<double> refSums(stripesAmount, 0);
+    std::vector<double> refSqSums(stripesAmount, 0);
+    std::vector<int> nzs(stripesAmount, 0);
+    std::vector<double> sampMaskedSums(stripesAmount, 0);
+    std::vector<double> refMaskedSums(stripesAmount, 0);
+    std::vector<int> nzsMasked(stripesAmount, 0);
+
+    double a00 = map.at<float>(0, 0);
+    double a01 = map.at<float>(0, 1);
+    double a02 = map.at<float>(0, 2);
+    double a10 = map.at<float>(1, 0);
+    double a11 = map.at<float>(1, 1);
+    double a12 = map.at<float>(1, 2);
+    double a20 = 0;
+    double a21 = 0;
+    double a22 = 0;
+    if constexpr (motionType == MOTION_HOMOGRAPHY) {
+        a20 = map.at<float>(2, 0);
+        a21 = map.at<float>(2, 1);
+        a22 = map.at<float>(2, 2);
+    }
+
+    const elemtype* samplePtr0 = sampleWithGrad.ptr<elemtype>(0);
+
+    parallel_for_(Range(0, stripesAmount), [&](const Range& range) {
+        int stripeNum = range.start;
+        int ystart = (hr * stripeNum) / stripesAmount;
+        ystart = roundUp(ystart, deltaY);
+        int yend = (hr * (range.end)) / stripesAmount;
+        // we don't store intermediate jacobian; instead, we iteratively update Hessian, sampleProj and refProj
+        for (int y = ystart; y < yend; y += deltaY) {
+            const elemtype* refPtr = ref.ptr<elemtype>(y);
+
+            std::array<float, (NPARAMS * NPARAMS + NPARAMS) / 2> hessPcache{};
+            std::array<float, NPARAMS> iprojCache{};
+            std::array<float, NPARAMS> tprojCache{};
+            std::array<float, NPARAMS> projSubCache{};
+
+            const float numeratorX0 = y * a01 + a02;
+            const float numeratorY0 = y * a11 + a12;
+            float denominator0 = 0;
+            if constexpr (motionType == MOTION_HOMOGRAPHY) {
+                denominator0 = y * a21 + a22;
+            }
+            int x = 0;
+
+            hessianTailHandler<motionType, NPARAMS, elemtype>(y,
+                                                              x,
+                                                              wr,
+                                                              hs,
+                                                              ws,
+                                                              samplePtr0,
+                                                              refPtr,
+                                                              numeratorX0,
+                                                              numeratorY0,
+                                                              denominator0,
+                                                              a00,
+                                                              a10,
+                                                              a20,
+                                                              sampSums[stripeNum],
+                                                              sampSqSums[stripeNum],
+                                                              refSums[stripeNum],
+                                                              refSqSums[stripeNum],
+                                                              nzs[stripeNum],
+                                                              sampMaskedSums[stripeNum],
+                                                              refMaskedSums[stripeNum],
+                                                              nzsMasked[stripeNum],
+                                                              hessPcache,
+                                                              iprojCache,
+                                                              tprojCache,
+                                                              projSubCache,
+                                                              correlations[stripeNum]);
+
+            constexprForUpperTriangle<NPARAMS>([&](int row, int col) {
+                hessPs[stripeNum][row * NPARAMS + col] += hessPcache[hessianRowStart<motionType>(row) + (col - row)];
+            });
+            constexprFor<0, NPARAMS>([&](int elem) {
+                iprojs[stripeNum][elem] += iprojCache[elem];
+                tprojs[stripeNum][elem] += tprojCache[elem];
+                projSubs[stripeNum][elem] += projSubCache[elem];
+            });
+        }
+    });
+    std::vector<double> hessP(NPARAMS * NPARAMS, 0.);
+    std::vector<double> iproj(NPARAMS, 0.);
+    std::vector<double> tproj(NPARAMS, 0.);
+    double sampMaskedSum = 0;
+    double refMaskedSum = 0;
+    double correlation = 0;
+    sampSum = sampSqSum = refSum = refSqSum = nz = 0;
+    int nzMasked = 0;
+
+    for (int stripeNum = 0; stripeNum < stripesAmount; stripeNum++) {
+        correlation += correlations[stripeNum];
+        sampSum += sampSums[stripeNum];
+        sampSqSum += sampSqSums[stripeNum];
+        refSum += refSums[stripeNum];
+        refSqSum += refSqSums[stripeNum];
+        sampMaskedSum += sampMaskedSums[stripeNum];
+        refMaskedSum += refMaskedSums[stripeNum];
+        nz += nzs[stripeNum];
+        nzMasked += nzsMasked[stripeNum];
+    }
+    double scale = nz == 0 ? 0. : 1. / nz;
+    double sampMean = sampSum * scale;
+    double refMean = refSum * scale;
+    correlation += nzMasked * sampMean * refMean - sampMaskedSum * refMean - refMaskedSum * sampMean;
+
+    for (int stripeNum = 0; stripeNum < stripesAmount; stripeNum++) {
+        for (int hessNum = 0; hessNum < static_cast<int>(hessP.size()); hessNum++) {
+            hessP[hessNum] += hessPs[stripeNum][hessNum];
+        }
+        for (int projNum = 0; projNum < NPARAMS; projNum++) {
+            iproj[projNum] += iprojs[stripeNum][projNum] - projSubs[stripeNum][projNum] * sampMean;
+            tproj[projNum] += tprojs[stripeNum][projNum] - projSubs[stripeNum][projNum] * refMean;
+        }
+    }
+
+    constexprForUpperTriangle<NPARAMS>([&](int row, int col) {
+        hessP[col * NPARAMS + row] = hessP[row * NPARAMS + col];
+    });
+
+    Mat(NPARAMS, NPARAMS, CV_64F, hessP.data()).convertTo(hessian, CV_32F);
+    Mat(NPARAMS, 1, CV_64F, iproj.data()).convertTo(sampleProj, CV_32F);
+    Mat(NPARAMS, 1, CV_64F, tproj.data()).convertTo(refProj, CV_32F);
+
+    return correlation;
+}
+
+void optimizeECC(Mat& sampleWithGrad,
+                 const Mat& reference,
+                 Mat& map,
+                 int motionType,
+                 double* rho,
+                 double* lastRho,
+                 int deltaY,
+                 int nparams) {
+    // warp-back portion of the inputImage and gradients to the coordinate space of the referenceFloat
+    double correlation = 0;
+
+    // matrices needed for solving linear equation system for maximizing ECC
+    Mat hessian = Mat(nparams, nparams, CV_32F);
+    Mat hessianInv = Mat(nparams, nparams, CV_32F);
+    Mat sampleProjection = Mat(nparams, 1, CV_32F);
+    Mat referenceProjection = Mat(nparams, 1, CV_32F);
+    Mat sampleProjectionHessian = Mat(nparams, 1, CV_32F);
+    Mat errorProjection = Mat(nparams, 1, CV_32F);
+    Mat deltaP = Mat(nparams, 1, CV_32F);
+
+    double sampSum;
+    double sampSqSum;
+    double referenceSum;
+    double referenceSqSum;
+    int nz;
+
+    {  // if(imageWithGrad.type() == CV_32FC4)
+        if (motionType == MOTION_EUCLIDEAN) {
+            correlation = imageHessianProjECC<MOTION_EUCLIDEAN, float>(map,
+                                                                       sampleWithGrad,
+                                                                       reference,
+                                                                       sampSum,
+                                                                       sampSqSum,
+                                                                       referenceSum,
+                                                                       referenceSqSum,
+                                                                       nz,
+                                                                       hessian,
+                                                                       sampleProjection,
+                                                                       referenceProjection,
+                                                                       deltaY);
+        } else {
+            correlation = imageHessianProjECC<MOTION_HOMOGRAPHY, float>(map,
+                                                                        sampleWithGrad,
+                                                                        reference,
+                                                                        sampSum,
+                                                                        sampSqSum,
+                                                                        referenceSum,
+                                                                        referenceSqSum,
+                                                                        nz,
+                                                                        hessian,
+                                                                        sampleProjection,
+                                                                        referenceProjection,
+                                                                        deltaY);
+        }
+    }
+    double scale = nz == 0 ? 0. : 1. / nz;
+    double sampMean = sampSum * scale;
+    double refMean = referenceSum * scale;
+    double sampStd = std::sqrt(std::max(sampSqSum * scale - sampMean * sampMean, 0.));
+    double refStd = std::sqrt(std::max(referenceSqSum * scale - refMean * refMean, 0.));
+
+    // inverse of Hessian
+    hessianInv = hessian.inv();
+    // calculate enhanced correlation coefficient (ECC)->rho
+    *lastRho = *rho;
+    double refNorm = std::sqrt(nz * refStd * refStd);
+    double sampNorm = std::sqrt(nz * sampStd * sampStd);
+
+    *rho = correlation / (sampNorm * refNorm);
+    if ((bool)cvIsNaN(*rho)) {
+        CV_Error(Error::StsNoConv, "NaN encountered.");
+    }
+
+    // calculate the parameter lambda to account for illumination variation
+    sampleProjectionHessian = hessianInv * sampleProjection;
+    const double lambdaN = (sampNorm * sampNorm) - sampleProjection.dot(sampleProjectionHessian);
+    const double lambdaD = correlation - referenceProjection.dot(sampleProjectionHessian);
+
+    if (lambdaD <= 0.0) {
+        CV_Error(Error::StsNoConv, "The algorithm stopped before its convergence. The correlation is going to be minimized. "
+            "Images may be uncorrelated or non-overlapped");
+    }
+    const double lambda = (lambdaN / lambdaD);
+
+    // estimate the update step delta_p
+    errorProjection = lambda * referenceProjection - sampleProjection;
+    gemm(hessianInv, errorProjection, 1., noArray(), 0., deltaP);
+
+    // update warping matrix
+    update_warping_matrix_ECC(map, deltaP, motionType);
+}
+
+Mat prepareGradients(const Mat& sample) {
+    CV_Assert(sample.type() == CV_32FC2 || sample.type() == CV_16FC2);
+
+    const int ws = sample.cols;
+    const int hs = sample.rows;
+
+    Mat sampleWithGrad;
+    int ntasks = std::min(4, hs);
+
+    {
+        sampleWithGrad = Mat(hs, ws, CV_32FC4);
+        float* dstPtr = sampleWithGrad.ptr<float>();
+        parallel_for_(Range(0, ntasks), [&](const Range& range) {
+            int rowstart = range.start * hs / ntasks;
+            int rowend = range.end * hs / ntasks;
+            for (int row = rowstart; row < rowend; row++) {
+                const float* sampleCurLine = sample.ptr<float>(row);
+                const float* samplePrevLine = sample.ptr<float>(std::max(row - 1, 0));
+                const float* sampleNextLine = sample.ptr<float>(std::min(row + 1, hs - 1));
+                float gradDivY = (row > 0 && row + 1 < hs) ? 0.5 : 0.25;
+                int col = 0;
+                for (; col < ws; col++) {
+                    int prevCol = std::max(col - 1, 0);
+                    int nextCol = std::min(col + 1, ws - 1);
+                    float gradDivX = (col > 0 && col + 1 < ws) ? 0.5 : 0.25;
+                    dstPtr[row * ws * 4 + col * 4] = sampleCurLine[2 * col];
+                    dstPtr[row * ws * 4 + col * 4 + 1] =
+                        gradDivX * (sampleCurLine[2 * nextCol] - sampleCurLine[2 * prevCol]);
+                    dstPtr[row * ws * 4 + col * 4 + 2] = gradDivY * (sampleNextLine[2 * col] - samplePrevLine[2 * col]);
+                    dstPtr[row * ws * 4 + col * 4 + 3] = sampleCurLine[2 * col + 1];
+                }
+            }
+        }, ntasks);
+    }
+    return sampleWithGrad;
+}
+
+void runECC(const Mat& reference,
+            const Mat& sample,
+            Mat& map,
+            int motionType,
+            int nparams,
+            double* rho,
+            double terminationEPS,
+            int numberOfIterations) {
+    CV_Assert((reference.type() == CV_32FC2 && sample.type() == CV_32FC2) ||
+              (reference.type() == CV_16FC2 && sample.type() == CV_16FC2));
+
+    const int hr = reference.rows;
+
+    Mat sampleWithGrad = prepareGradients(sample);
+
+    const int LOW_SIZE = 200;
+    int deltaY = hr < LOW_SIZE ? 1 : 2;
+
+    // iteratively update mapMatrix
+    double lastRho = -terminationEPS;
+    for (int i = 1; (i <= numberOfIterations) && (fabs(*rho - lastRho) >= terminationEPS); i++) {
+        optimizeECC(sampleWithGrad, reference, map, motionType, rho, &lastRho, deltaY, nparams);
+    }
+}
+
+static void buildPyramidECC(InputArray inputImage,
+                  MatPyramid& imgPyramid,
+                  InputArray& mask,
+                  MatPyramid& maskPyramid,
+                  int numberOfPyramidsLevel) {
+    imgPyramid.resize(numberOfPyramidsLevel);
+    inputImage.getMat().convertTo(imgPyramid[0], CV_8UC1);
+    maskPyramid.resize(numberOfPyramidsLevel);
+    if (!mask.empty()) {
+        mask.getMat().convertTo(maskPyramid[0], CV_8UC1);
+    }
+    for (int pyrLevel = 0; pyrLevel < numberOfPyramidsLevel - 1; ++pyrLevel) {
+        Size size = Size((imgPyramid[pyrLevel].cols + 1) / 2, (imgPyramid[pyrLevel].rows + 1) / 2);
+        pyrDown(imgPyramid[pyrLevel], imgPyramid[pyrLevel + 1], size);
+        if (!mask.empty()) {
+            pyrDown(maskPyramid[pyrLevel], maskPyramid[pyrLevel + 1], size);
+            threshold(maskPyramid[pyrLevel + 1], maskPyramid[pyrLevel + 1], 254, 0xff, THRESH_BINARY);
+        }
+    }
+}
+
+static Mat spliceWithMask(const Mat& image, const Mat& mask) {
+    CV_Assert(image.type() == CV_32F && (mask.empty() || mask.type() == CV_8U));
+    if (!mask.empty() && image.size() != mask.size()) {
+        CV_Error(Error::BadImageSize, "spliceWithMask: Mask and image have to be of same size.");
+    }
+    const int hs = image.rows;
+    const int ws = image.cols;
+
+    Mat result;
+    int ntasks = std::min(4, hs);
+    {
+        union conv_ {
+            uint32_t valU;
+            float val;
+            conv_() : valU(0xffffffff) {}
+        } conv;
+        result = Mat(hs, ws, CV_32FC2);
+        parallel_for_(Range(0, ntasks), [&](const Range& range) {
+            int rowstart = range.start * hs / ntasks;
+            int rowend = range.end * hs / ntasks;
+            for (int row = rowstart; row < rowend; row++) {
+                float* dstPtr = result.ptr<float>(row);
+                const float* srcPtr = image.ptr<float>(row);
+                const uint8_t* maskPtr = !mask.empty() ? mask.ptr<uint8_t>(row) : nullptr;
+                int col = 0;
+                for (; col < ws; col++) {
+                    dstPtr[col * 2] = srcPtr[col];
+                    dstPtr[col * 2 + 1] = (!maskPtr || maskPtr[col]) ? conv.val : 0;
+                }
+            }
+        }, ntasks);
+    }
+    return result;
+}
+
+static void scaleWarpMatix(Mat& warpMatrix, float scale) {
+    if (warpMatrix.rows == 3) {
+        Mat invertScaleMat = Mat(3, 3, CV_32F, 0.f);
+        invertScaleMat.at<float>(0, 0) = 1.f / scale;
+        invertScaleMat.at<float>(1, 1) = 1.f / scale;
+        invertScaleMat.at<float>(2, 2) = 1.f;
+        Mat scaleMatrix = invertScaleMat.clone();
+        scaleMatrix.at<float>(0, 0) = scale;
+        scaleMatrix.at<float>(1, 1) = scale;
+        gemm(warpMatrix, invertScaleMat, 1., noArray(), 0., warpMatrix);
+        gemm(scaleMatrix, warpMatrix, 1., noArray(), 0., warpMatrix);
+        // Normalization, internal algorithms assumes, that a22 = 1.0f
+        for (int mel = 0; mel < 8; mel++) {
+            (reinterpret_cast<float*>(warpMatrix.data))[mel] /=
+                (reinterpret_cast<float*>(warpMatrix.data))[8];
+        }
+        (reinterpret_cast<float*>(warpMatrix.data))[8] = 1.f;
+    } else {
+        warpMatrix.at<float>(0, 2) *= scale;
+        warpMatrix.at<float>(1, 2) *= scale;
+    }
+}
+
+static void checkParams(const MatPyramid& referencePyramid,
+                 const MatPyramid& samplePyramid,
+                 Mat& map,
+                 int motionType,
+                 TermCriteria criteria,
+                 std::vector<int>& itersPerLevel,
+                 int numberOfPyramidsLevel) {
+    if (itersPerLevel.empty()) {
+        itersPerLevel.resize(numberOfPyramidsLevel, criteria.maxCount);
+    }
+    CV_Assert(static_cast<int>(itersPerLevel.size()) == numberOfPyramidsLevel);
+    CV_Assert(!referencePyramid.empty());
+    for (const auto& lvl : referencePyramid) {
+        CV_Assert(!lvl.empty() && lvl.type() == referencePyramid[0].type());
+    }
+    CV_Assert(!samplePyramid.empty());
+    for (const auto& lvl : samplePyramid) {
+        CV_Assert(!lvl.empty() && lvl.type() == samplePyramid[0].type());
+    }
+    CV_Assert(samplePyramid.size() == referencePyramid.size() && samplePyramid.size() == itersPerLevel.size());
+
+    // If the user passed an un-initialized warpMatrix, initialize to identity
+    if (referencePyramid[0].type() != CV_32FC2 && referencePyramid[0].type() != CV_16FC2) {
+        CV_Error(Error::StsError, "Reference pyramid have to be prepared via prepareReferencePyramid function");
+    }
+    // accept only 1-channel images
+    CV_Assert(samplePyramid[0].type() == CV_32FC2 || samplePyramid[0].type() != CV_16FC2);
+    CV_Assert(map.type() == CV_32FC1);
+    if (map.cols != 3 || (map.rows != 2 && map.rows != 3)) {
+        CV_Error(Error::BadImageSize, "warpMatrix has incorrect size");
+    }
+
+    if (motionType != MOTION_HOMOGRAPHY && motionType != MOTION_EUCLIDEAN) {
+        CV_Error(Error::StsError, "Incorrect motion type");
+    }
+
+    if (motionType == MOTION_HOMOGRAPHY && map.rows != 3) {
+        CV_Error(Error::BadImageSize, "warpMatrix has incorrect size");
+    }
+
+    if (!((bool)(criteria.type & TermCriteria::COUNT) || (bool)(criteria.type & TermCriteria::EPS))) {
+        CV_Error(Error::StsError, "Incorrect stop criteria");
+    }
+}
+
+MatPyramid cv::prepareECCPyramid(InputArray image,
+                             InputArray imageMask,  // Can be empty
+                             int gaussFiltSize,
+                             int numberOfPyramidsLevel) {
+    MatPyramid imagePyramid, maskPyramid;
+    buildPyramidECC(image, imagePyramid, imageMask, maskPyramid, numberOfPyramidsLevel);
+    for (int lvl = 0; lvl < numberOfPyramidsLevel; lvl++) {
+        Mat imgFloat;
+        imagePyramid[lvl].convertTo(imgFloat, CV_32F, 1. / 255.);
+        if (gaussFiltSize != 0) {
+            GaussianBlur(imgFloat, imgFloat, Size(gaussFiltSize, gaussFiltSize), 0, 0);
+        }
+        imagePyramid[lvl] = spliceWithMask(
+            imgFloat,
+            (static_cast<int>(maskPyramid.size()) > lvl && !maskPyramid[lvl].empty()) ? maskPyramid[lvl] : Mat());
+    }
+    return imagePyramid;
+}
+
+double cv::findTransformECC2(InputArray reference,
+                        InputArray sample,
+                        InputOutputArray warpMatrix,
+                        const int motionType,
+                        const TermCriteria criteria,
+                        const std::vector<int>& itersPerLevel,
+                        InputArray referenceMask,
+                        InputArray sampleMask,
+                        const int gaussFiltSize,
+                        const int numberOfPyramidsLevel) {
+    MatPyramid referencePyramid =
+        prepareECCPyramid(reference, referenceMask, gaussFiltSize, numberOfPyramidsLevel);
+    return findTransformECC2(referencePyramid,
+                            sample,
+                            warpMatrix,
+                            motionType,
+                            criteria,
+                            itersPerLevel,
+                            sampleMask,
+                            gaussFiltSize,
+                            numberOfPyramidsLevel);
+}
+
+double cv::findTransformECC2(const MatPyramid& referencePyramid,
+                        InputArray sample,
+                        InputOutputArray warpMatrix,
+                        const int motionType,
+                        const TermCriteria criteria,
+                        const std::vector<int>& itersPerLevel,
+                        InputArray sampleMask,
+                        const int gaussFiltSize,
+                        const int numberOfPyramidsLevel) {
+    MatPyramid samplePyramid = prepareECCPyramid(sample, sampleMask, gaussFiltSize, numberOfPyramidsLevel);
+    return findTransformECC2(referencePyramid,
+                            samplePyramid,
+                            warpMatrix,
+                            motionType,
+                            criteria,
+                            itersPerLevel,
+                            gaussFiltSize,
+                            numberOfPyramidsLevel);
+}
+
+double cv::findTransformECC2(InputArray reference,
+                        const MatPyramid& samplePyramid,
+                        InputOutputArray warpMatrix,
+                        const int motionType,
+                        const TermCriteria criteria,
+                        const std::vector<int>& itersPerLevel,
+                        InputArray referenceMask,
+                        const int gaussFiltSize,
+                        const int numberOfPyramidsLevel) {
+    MatPyramid referencePyramid =
+        prepareECCPyramid(reference, referenceMask, gaussFiltSize, numberOfPyramidsLevel);
+    return findTransformECC2(referencePyramid,
+                            samplePyramid,
+                            warpMatrix,
+                            motionType,
+                            criteria,
+                            itersPerLevel,
+                            gaussFiltSize,
+                            numberOfPyramidsLevel);
+}
+
+double cv::findTransformECC2(const MatPyramid& referencePyramid,
+                        const MatPyramid& samplePyramid,
+                        InputOutputArray warpMatrixA,
+                        const int motionType,
+                        const TermCriteria criteria,
+                        const std::vector<int>& itersPerLevel,
+                        const int gaussFiltSize,
+                        const int numberOfPyramidsLevel) {
+    Mat& warpMatrix = warpMatrixA.getMatRef();
+    std::vector<int> itersPerLevelCopy = itersPerLevel;
+    // If the user passed an un-initialized warpMatrix, initialize to identity
+    if (warpMatrix.empty()) {
+        int rowCount = motionType == MOTION_HOMOGRAPHY ? 3 : 2;
+        warpMatrix = Mat::eye(rowCount, 3, CV_32FC1);
+    }
+
+    checkParams(referencePyramid,
+                samplePyramid,
+                warpMatrix,
+                motionType,
+                criteria,
+                itersPerLevelCopy,
+                numberOfPyramidsLevel);
+
+    int nparams = 6;  // default: affine
+    switch (motionType) {
+        case MOTION_TRANSLATION:
+            nparams = 2;
+            break;
+        case MOTION_EUCLIDEAN:
+            nparams = 3;
+            break;
+        case MOTION_HOMOGRAPHY:
+            nparams = 8;
+            break;
+    }
+
+    const std::vector<int> numberOfIterations = ((criteria.type & TermCriteria::COUNT) != 0)
+                                                    ? itersPerLevelCopy
+                                                    : std::vector<int>(numberOfPyramidsLevel, 200);
+    const double terminationEPS = (bool)(criteria.type & TermCriteria::EPS) ? criteria.epsilon : -1;
+
+    // Scale warp matrix multiple times to lower pyramid level
+    for (int pyrLevel = 0; pyrLevel < numberOfPyramidsLevel - 1; pyrLevel++) {
+        scaleWarpMatix(warpMatrix, 0.5);
+    }
+    double rho = -1;
+    for (int pyrLevel = numberOfPyramidsLevel - 1; pyrLevel >= 0; --pyrLevel) {
+        runECC(referencePyramid[pyrLevel],
+               samplePyramid[pyrLevel],
+               warpMatrix,
+               motionType,
+               nparams,
+               &rho,
+               terminationEPS,
+               numberOfIterations[pyrLevel]);
+        if (pyrLevel > 0) {
+            scaleWarpMatix(warpMatrix, 2);
+        }
+    }
+    // return final correlation coefficient
+    return rho;
+}

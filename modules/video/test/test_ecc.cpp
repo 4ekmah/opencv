@@ -49,6 +49,7 @@ class CV_ECC_BaseTest : public cvtest::BaseTest {
    public:
     CV_ECC_BaseTest();
     virtual ~CV_ECC_BaseTest();
+    void usePyramids();
 
    protected:
     double computeRMS(const Mat& mat1, const Mat& mat2);
@@ -68,6 +69,8 @@ class CV_ECC_BaseTest : public cvtest::BaseTest {
     double ECC_epsilon;  // we choose a negative value, so that
     // ECC_iterations are always executed
     TermCriteria criteria;
+    bool grayscale_only;     // test only grayscale images
+    bool use_pyramids;       // use version of findTransformECC with pyramids
 };
 
 CV_ECC_BaseTest::CV_ECC_BaseTest() {
@@ -76,6 +79,8 @@ CV_ECC_BaseTest::CV_ECC_BaseTest() {
     ECC_iterations = 50;
     ECC_epsilon = -1;  //-> negative value means that ECC_Iterations will be executed
     criteria = TermCriteria(TermCriteria::COUNT + TermCriteria::EPS, ECC_iterations, ECC_epsilon);
+    grayscale_only = false;
+    use_pyramids = false;
 }
 
 CV_ECC_BaseTest::~CV_ECC_BaseTest() {}
@@ -128,8 +133,9 @@ bool CV_ECC_BaseTest::testAllTypes(const Mat img) {
 }
 
 bool CV_ECC_BaseTest::testAllChNum(const Mat img) {
-    if (!testAllTypes(img))
-        return false;
+    if(!grayscale_only)
+        if (!testAllTypes(img))
+            return false;
 
     Mat gray;
     cvtColor(img, gray, COLOR_RGB2GRAY);
@@ -153,6 +159,11 @@ void CV_ECC_BaseTest::run(int) {
     testAllChNum(testImg);
 
     ts->set_failed_test_info(cvtest::TS::OK);
+}
+
+void CV_ECC_BaseTest::usePyramids()
+{
+    grayscale_only = use_pyramids = true;
 }
 
 class CV_ECC_Test_Translation : public CV_ECC_BaseTest {
@@ -219,7 +230,14 @@ bool CV_ECC_Test_Euclidean::test(const Mat testImg) {
 
         Mat mapEuclidean = (Mat_<float>(2, 3) << 1, 0, 0, 0, 1, 0);
 
-        findTransformECC(warpedImage, testImg, mapEuclidean, 1, criteria);
+        if(use_pyramids) 
+        {
+            findTransformECC2(InputArray(warpedImage), InputArray(testImg), mapEuclidean, MOTION_EUCLIDEAN, criteria);
+        }
+        else
+        {
+            findTransformECC(warpedImage, testImg, mapEuclidean, 1, criteria);
+        }
 
         if (!checkMap(mapEuclidean, euclideanGround))
             return false;
@@ -292,8 +310,14 @@ bool CV_ECC_Test_Homography::test(const Mat testImg) {
         warpPerspective(testImg, warpedImage, homoGround, Size(200, 200), INTER_LINEAR + WARP_INVERSE_MAP);
 
         Mat mapHomography = Mat::eye(3, 3, CV_32F);
-
-        findTransformECC(warpedImage, testImg, mapHomography, 3, criteria);
+        if(use_pyramids) 
+        {
+            findTransformECC2(InputArray(warpedImage), InputArray(testImg), mapHomography, MOTION_HOMOGRAPHY, criteria);
+        }
+        else
+        {
+            findTransformECC(warpedImage, testImg, mapHomography, 3, criteria);
+        }
 
         if (!checkMap(mapHomography, homoGround))
             return false;
@@ -458,12 +482,22 @@ TEST(Video_ECC_Euclidean, accuracy) {
     CV_ECC_Test_Euclidean test;
     test.safe_run();
 }
+TEST(Video_ECC_Euclidean_Pyr, accuracy) {
+    CV_ECC_Test_Euclidean test;
+    test.usePyramids();
+    test.safe_run();
+}
 TEST(Video_ECC_Affine, accuracy) {
     CV_ECC_Test_Affine test;
     test.safe_run();
 }
 TEST(Video_ECC_Homography, accuracy) {
     CV_ECC_Test_Homography test;
+    test.safe_run();
+}
+TEST(Video_ECC_Homography_Pyr, accuracy) {
+    CV_ECC_Test_Homography test;
+    test.usePyramids();
     test.safe_run();
 }
 TEST(Video_ECC_Mask, accuracy) {

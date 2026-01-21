@@ -419,6 +419,297 @@ CV_EXPORTS_W double findTransformECCWithMask( InputArray templateImage,
                                  TermCriteria criteria = TermCriteria(TermCriteria::COUNT + TermCriteria::EPS, 50, 1e-6),
                                  int gaussFiltSize = 5 );
 
+
+typedef std::vector<cv::Mat> MatPyramid; //DUBUG: delete it from here!!!
+
+/** @brief Prepares pyramid for ECC algorithm(pyramids variation). Can be used for economy with
+burst algorithms or iterative approaches.
+
+@param image Single channel source image for pyramid; CV_8U, CV_16U, CV_32F, CV_64F type. //DUBUG: ORLY?
+@param imageMask An optional single channel mask to indicate valid values of sample. CV_8U.
+Can be empty. In this case the mask will be created automatically and filled with 255 in
+each pixel.
+@param gaussFiltSize An optional value indicating size of gaussian blur filter; (DEFAULT: 5)
+@param numberOfPyramidsLevel An optional value indicating amount of levels in the pyramid; (DEFAULT: 4)
+
+The function prepares pyramid for findTransformECC function, spliced with mask. Both, image and mask are 
+correctly downscaled with Gaussian blur of given number. Mask is also binarized to 0 and 255 values.
+
+Note, that used parameters(gaussFiltSize, numberOfPyramidsLevel) have to be equal to this parameters in
+consecutive findTransformECC call, otherwise it can cause errors - calculational error or format error.
+
+@sa
+findTransformECC
+*/
+CV_EXPORTS_W MatPyramid prepareECCPyramid(InputArray image,
+                             InputArray imageMask,  // Can be empty
+                             int gaussFiltSize = 5,
+                             int numberOfPyramidsLevel = 4);
+
+
+/** @brief Finds the geometric transform (warp) between two images in terms of the ECC criterion @cite EP08. Uses pyramids.
+
+@param reference Single channel reference image; CV_8U, CV_16U, CV_32F, CV_64F type.
+@param sample sample image which should be warped with the final warpMatrix in
+order to provide an image similar to reference, same type as reference.
+@param warpMatrix floating-point \f$2\times 3\f$ or \f$3\times 3\f$ mapping matrix (warp).
+@param motionType parameter, specifying the type of motion:
+ -   **MOTION_TRANSLATION** sets a translational motion model; warpMatrix is \f$2\times 3\f$ with
+     the first \f$2\times 2\f$ part being the unity matrix and the rest two parameters being
+     estimated.
+ -   **MOTION_EUCLIDEAN** sets a Euclidean (rigid) transformation as motion model; three
+     parameters are estimated; warpMatrix is \f$2\times 3\f$.
+ -   **MOTION_AFFINE** sets an affine motion model (DEFAULT); six parameters are estimated;
+     warpMatrix is \f$2\times 3\f$.
+ -   **MOTION_HOMOGRAPHY** sets a homography as a motion model; eight parameters are
+     estimated;\`warpMatrix\` is \f$3\times 3\f$.
+@param criteria parameter, specifying the termination criteria of the ECC algorithm;
+criteria.epsilon defines the threshold of the increment in the correlation coefficient between two
+iterations (a negative criteria.epsilon makes criteria.maxcount the only termination criterion).
+Default values are shown in the declaration above.
+@param itersPerLevel Criterion extension: distribution of iterations limit over pyramid levels.
+Can be empty, in this case, this algorithm will use criteria.maxCount on each level.
+@param referenceMask An optional single channel mask to indicate valid values of reference.
+@param sampleMask An optional single channel mask to indicate valid values of sample.
+@param gaussFiltSize An optional value indicating size of gaussian blur filter; (DEFAULT: 5)
+@param numberOfPyramidsLevel An optional value indicating amount of levels in the pyramid; (DEFAULT: 4)
+
+The function estimates the optimum transformation (warpMatrix) with respect to ECC criterion
+(@cite EP08), that is
+
+\f[\texttt{warpMatrix} = \arg\max_{W} \texttt{ECC}(\texttt{templateImage}(x,y),\texttt{inputImage}(x',y'))\f]
+
+where
+
+\f[\begin{bmatrix} x' \\ y' \end{bmatrix} = W \cdot \begin{bmatrix} x \\ y \\ 1 \end{bmatrix}\f]
+
+(the equation holds with homogeneous coordinates for homography). It returns the final enhanced
+correlation coefficient, that is the correlation coefficient between the template image and the
+final warped input image. When a \f$3\times 3\f$ matrix is given with motionType =0, 1 or 2, the third
+row is ignored.
+
+Unlike findHomography and estimateRigidTransform, the function findTransformECC implements an
+area-based alignment that builds on intensity similarities. In essence, the function updates the
+initial transformation that roughly aligns the images. If this information is missing, the identity
+warp (unity matrix) is used as an initialization. Note that if images undergo strong
+displacements/rotations, an initial transformation that roughly aligns the images is necessary
+(e.g., a simple euclidean/similarity transform that allows for the images showing the same image
+content approximately). Use inverse warping in the second image to take an image close to the first
+one, i.e. use the flag WARP_INVERSE_MAP with warpAffine or warpPerspective. See also the OpenCV
+sample image_alignment.cpp that demonstrates the use of the function. Note that the function throws
+an exception if algorithm does not converges.
+
+@sa
+computeECC, estimateAffine2D, estimateAffinePartial2D, findHomography
+*/
+CV_EXPORTS_W double findTransformECC2(InputArray reference, //DUBUG: 2? Use normal name!
+                        InputArray sample,
+                        InputOutputArray warpMatrix,
+                        const int motionType,
+                        const cv::TermCriteria criteria,
+                        const std::vector<int>& itersPerLevel = std::vector<int>(),
+                        InputArray referenceMask = cv::Mat(),
+                        InputArray sampleMask = cv::Mat(),
+                        const int gaussFiltSize = 5,
+                        const int numberOfPyramidsLevel = 4);
+
+/** @brief Finds the geometric transform (warp) between two images in terms of the ECC criterion @cite EP08. Uses pyramids.
+
+@param referencePyramid Reference pyramid, prepared by prepareECCPyramid function called with same 
+parameters(gaussFiltSize, numberOfPyramidsLevel). Mask is already embedded.
+@param sample Sample image which should be warped with the final warpMatrix in
+order to provide an image similar to reference, same type as reference.
+@param warpMatrix floating-point \f$2\times 3\f$ or \f$3\times 3\f$ mapping matrix (warp).
+@param motionType parameter, specifying the type of motion:
+ -   **MOTION_TRANSLATION** sets a translational motion model; warpMatrix is \f$2\times 3\f$ with
+     the first \f$2\times 2\f$ part being the unity matrix and the rest two parameters being
+     estimated.
+ -   **MOTION_EUCLIDEAN** sets a Euclidean (rigid) transformation as motion model; three
+     parameters are estimated; warpMatrix is \f$2\times 3\f$.
+ -   **MOTION_AFFINE** sets an affine motion model (DEFAULT); six parameters are estimated;
+     warpMatrix is \f$2\times 3\f$.
+ -   **MOTION_HOMOGRAPHY** sets a homography as a motion model; eight parameters are
+     estimated;\`warpMatrix\` is \f$3\times 3\f$.
+@param criteria parameter, specifying the termination criteria of the ECC algorithm;
+criteria.epsilon defines the threshold of the increment in the correlation coefficient between two
+iterations (a negative criteria.epsilon makes criteria.maxcount the only termination criterion).
+Default values are shown in the declaration above.
+@param itersPerLevel Criterion extension: distribution of iterations limit over pyramid levels.
+Can be empty, in this case, this algorithm will use criteria.maxCount on each level.
+@param sampleMask An optional single channel mask to indicate valid values of sample.
+@param gaussFiltSize An optional value indicating size of gaussian blur filter; (DEFAULT: 5)
+@param numberOfPyramidsLevel An optional value indicating amount of levels in the pyramid; (DEFAULT: 4)
+
+The function estimates the optimum transformation (warpMatrix) with respect to ECC criterion
+(@cite EP08), that is
+
+\f[\texttt{warpMatrix} = \arg\max_{W} \texttt{ECC}(\texttt{templateImage}(x,y),\texttt{inputImage}(x',y'))\f]
+
+where
+
+\f[\begin{bmatrix} x' \\ y' \end{bmatrix} = W \cdot \begin{bmatrix} x \\ y \\ 1 \end{bmatrix}\f]
+
+(the equation holds with homogeneous coordinates for homography). It returns the final enhanced
+correlation coefficient, that is the correlation coefficient between the template image and the
+final warped input image. When a \f$3\times 3\f$ matrix is given with motionType =0, 1 or 2, the third
+row is ignored.
+
+Unlike findHomography and estimateRigidTransform, the function findTransformECC implements an
+area-based alignment that builds on intensity similarities. In essence, the function updates the
+initial transformation that roughly aligns the images. If this information is missing, the identity
+warp (unity matrix) is used as an initialization. Note that if images undergo strong
+displacements/rotations, an initial transformation that roughly aligns the images is necessary
+(e.g., a simple euclidean/similarity transform that allows for the images showing the same image
+content approximately). Use inverse warping in the second image to take an image close to the first
+one, i.e. use the flag WARP_INVERSE_MAP with warpAffine or warpPerspective. See also the OpenCV
+sample image_alignment.cpp that demonstrates the use of the function. Note that the function throws
+an exception if algorithm does not converges.
+
+@sa
+computeECC, estimateAffine2D, estimateAffinePartial2D, findHomography
+*/
+
+CV_EXPORTS_W double findTransformECC2(const MatPyramid& referencePyramid,
+                        InputArray sample,
+                        InputOutputArray warpMatrix,
+                        const int motionType,
+                        const cv::TermCriteria criteria,
+                        const std::vector<int>& itersPerLevel = std::vector<int>(),
+                        InputArray sampleMask = cv::Mat(),
+                        const int gaussFiltSize = 5,
+                        const int numberOfPyramidsLevel = 4);
+
+/** @brief Finds the geometric transform (warp) between two images in terms of the ECC criterion @cite EP08. Uses pyramids.
+
+@param reference Single channel reference image; CV_8U, CV_16U, CV_32F, CV_64F type.
+@param samplePyramid Sample pyramid, prepared by prepareECCPyramid function called with same 
+parameters(gaussFiltSize, numberOfPyramidsLevel). Mask is already embedded. Pyramid is made 
+of image which should be warped with the final warpMatrix in order to provide an image
+similar to reference.
+@param warpMatrix floating-point \f$2\times 3\f$ or \f$3\times 3\f$ mapping matrix (warp).
+@param motionType parameter, specifying the type of motion:
+ -   **MOTION_TRANSLATION** sets a translational motion model; warpMatrix is \f$2\times 3\f$ with
+     the first \f$2\times 2\f$ part being the unity matrix and the rest two parameters being
+     estimated.
+ -   **MOTION_EUCLIDEAN** sets a Euclidean (rigid) transformation as motion model; three
+     parameters are estimated; warpMatrix is \f$2\times 3\f$.
+ -   **MOTION_AFFINE** sets an affine motion model (DEFAULT); six parameters are estimated;
+     warpMatrix is \f$2\times 3\f$.
+ -   **MOTION_HOMOGRAPHY** sets a homography as a motion model; eight parameters are
+     estimated;\`warpMatrix\` is \f$3\times 3\f$.
+@param criteria parameter, specifying the termination criteria of the ECC algorithm;
+criteria.epsilon defines the threshold of the increment in the correlation coefficient between two
+iterations (a negative criteria.epsilon makes criteria.maxcount the only termination criterion).
+Default values are shown in the declaration above.
+@param itersPerLevel Criterion extension: distribution of iterations limit over pyramid levels.
+Can be empty, in this case, this algorithm will use criteria.maxCount on each level.
+@param referenceMask An optional single channel mask to indicate valid values of reference.
+@param gaussFiltSize An optional value indicating size of gaussian blur filter; (DEFAULT: 5)
+@param numberOfPyramidsLevel An optional value indicating amount of levels in the pyramid; (DEFAULT: 4)
+
+The function estimates the optimum transformation (warpMatrix) with respect to ECC criterion
+(@cite EP08), that is
+
+\f[\texttt{warpMatrix} = \arg\max_{W} \texttt{ECC}(\texttt{templateImage}(x,y),\texttt{inputImage}(x',y'))\f]
+
+where
+
+\f[\begin{bmatrix} x' \\ y' \end{bmatrix} = W \cdot \begin{bmatrix} x \\ y \\ 1 \end{bmatrix}\f]
+
+(the equation holds with homogeneous coordinates for homography). It returns the final enhanced
+correlation coefficient, that is the correlation coefficient between the template image and the
+final warped input image. When a \f$3\times 3\f$ matrix is given with motionType =0, 1 or 2, the third
+row is ignored.
+
+Unlike findHomography and estimateRigidTransform, the function findTransformECC implements an
+area-based alignment that builds on intensity similarities. In essence, the function updates the
+initial transformation that roughly aligns the images. If this information is missing, the identity
+warp (unity matrix) is used as an initialization. Note that if images undergo strong
+displacements/rotations, an initial transformation that roughly aligns the images is necessary
+(e.g., a simple euclidean/similarity transform that allows for the images showing the same image
+content approximately). Use inverse warping in the second image to take an image close to the first
+one, i.e. use the flag WARP_INVERSE_MAP with warpAffine or warpPerspective. See also the OpenCV
+sample image_alignment.cpp that demonstrates the use of the function. Note that the function throws
+an exception if algorithm does not converges.
+
+@sa
+computeECC, estimateAffine2D, estimateAffinePartial2D, findHomography
+*/
+
+CV_EXPORTS_W double findTransformECC2(InputArray reference,
+                        const MatPyramid& samplePyramid,
+                        InputOutputArray warpMatrix,
+                        const int motionType,
+                        const cv::TermCriteria criteria,
+                        const std::vector<int>& itersPerLevel = std::vector<int>(),
+                        InputArray referenceMask = cv::Mat(),
+                        const int gaussFiltSize = 5,
+                        const int numberOfPyramidsLevel = 4);
+
+/** @brief Finds the geometric transform (warp) between two images in terms of the ECC criterion @cite EP08. Uses pyramids.
+
+@param referencePyramid Reference pyramid, prepared by prepareECCPyramid function. Mask is already
+embedded.
+@param samplePyramid Sample pyramid, prepared by prepareECCPyramid function called. Mask is already embedded. Pyramid is made 
+of image which should be warped with the final warpMatrix in order to provide an image
+similar to reference.
+@param warpMatrix floating-point \f$2\times 3\f$ or \f$3\times 3\f$ mapping matrix (warp).
+@param motionType parameter, specifying the type of motion:
+ -   **MOTION_TRANSLATION** sets a translational motion model; warpMatrix is \f$2\times 3\f$ with
+     the first \f$2\times 2\f$ part being the unity matrix and the rest two parameters being
+     estimated.
+ -   **MOTION_EUCLIDEAN** sets a Euclidean (rigid) transformation as motion model; three
+     parameters are estimated; warpMatrix is \f$2\times 3\f$.
+ -   **MOTION_AFFINE** sets an affine motion model (DEFAULT); six parameters are estimated;
+     warpMatrix is \f$2\times 3\f$.
+ -   **MOTION_HOMOGRAPHY** sets a homography as a motion model; eight parameters are
+     estimated;\`warpMatrix\` is \f$3\times 3\f$.
+@param criteria parameter, specifying the termination criteria of the ECC algorithm;
+criteria.epsilon defines the threshold of the increment in the correlation coefficient between two
+iterations (a negative criteria.epsilon makes criteria.maxcount the only termination criterion).
+Default values are shown in the declaration above.
+@param itersPerLevel Criterion extension: distribution of iterations limit over pyramid levels.
+Can be empty, in this case, this algorithm will use criteria.maxCount on each level.
+@param gaussFiltSize An optional value indicating size of gaussian blur filter; (DEFAULT: 5)
+@param numberOfPyramidsLevel An optional value indicating amount of levels in the pyramid; (DEFAULT: 4)
+
+The function estimates the optimum transformation (warpMatrix) with respect to ECC criterion
+(@cite EP08), that is
+
+\f[\texttt{warpMatrix} = \arg\max_{W} \texttt{ECC}(\texttt{templateImage}(x,y),\texttt{inputImage}(x',y'))\f]
+
+where
+
+\f[\begin{bmatrix} x' \\ y' \end{bmatrix} = W \cdot \begin{bmatrix} x \\ y \\ 1 \end{bmatrix}\f]
+
+(the equation holds with homogeneous coordinates for homography). It returns the final enhanced
+correlation coefficient, that is the correlation coefficient between the template image and the
+final warped input image. When a \f$3\times 3\f$ matrix is given with motionType =0, 1 or 2, the third
+row is ignored.
+
+Unlike findHomography and estimateRigidTransform, the function findTransformECC implements an
+area-based alignment that builds on intensity similarities. In essence, the function updates the
+initial transformation that roughly aligns the images. If this information is missing, the identity
+warp (unity matrix) is used as an initialization. Note that if images undergo strong
+displacements/rotations, an initial transformation that roughly aligns the images is necessary
+(e.g., a simple euclidean/similarity transform that allows for the images showing the same image
+content approximately). Use inverse warping in the second image to take an image close to the first
+one, i.e. use the flag WARP_INVERSE_MAP with warpAffine or warpPerspective. See also the OpenCV
+sample image_alignment.cpp that demonstrates the use of the function. Note that the function throws
+an exception if algorithm does not converges.
+
+@sa
+computeECC, estimateAffine2D, estimateAffinePartial2D, findHomography
+*/
+CV_EXPORTS_W double findTransformECC2(const MatPyramid& referencePyramid,
+                        const MatPyramid& samplePyramid,
+                        InputOutputArray warpMatrix,
+                        const int motionType,
+                        const cv::TermCriteria criteria,
+                        const std::vector<int>& itersPerLevel = std::vector<int>(),
+                        const int gaussFiltSize = 5,
+                        const int numberOfPyramidsLevel = 4);
+
 /** @example samples/cpp/kalman.cpp
 An example using the standard Kalman filter
 */
