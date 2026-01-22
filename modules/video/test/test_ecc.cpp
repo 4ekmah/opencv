@@ -230,7 +230,7 @@ bool CV_ECC_Test_Euclidean::test(const Mat testImg) {
 
         Mat mapEuclidean = (Mat_<float>(2, 3) << 1, 0, 0, 0, 1, 0);
 
-        if(use_pyramids) 
+        if(use_pyramids)
         {
             findTransformECC2(InputArray(warpedImage), InputArray(testImg), mapEuclidean, MOTION_EUCLIDEAN, criteria);
         }

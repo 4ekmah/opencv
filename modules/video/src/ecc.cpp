@@ -720,50 +720,181 @@ double cv::findTransformECC(InputArray templateImage, InputArray inputImage, Inp
 
 
 //DUBUG: patch starts here:
-
-inline void reinterpret(Mat& mat, int newdepth) {
+//DUBUG: to snake case?
+inline void reinterpret(Mat& mat, int newdepth) { 
     mat.flags = (mat.flags & ~CV_MAT_DEPTH_MASK) | newdepth;
 }
 
-template<int Start, int End, class F>
+template<int N, class F>
+class constexprForClass
+{
+public: 
+    static inline void execute(F&& fVal) {
+        constexprForClass<N-1, F>::execute(std::forward<F>(fVal));
+        fVal(N-1);
+    }
+};
+
+template<class F>
+class constexprForClass<0, F>
+{
+public: 
+    static inline void execute(F&&) {}
+};
+
+template<int N, class F>
 constexpr void constexprFor(F&& fVal) {
-    if constexpr (Start < End) {
-        fVal(Start);
-        constexprFor<Start + 1, End>(std::forward<F>(fVal));
-    }
+    constexprForClass<N, F>::execute(std::forward<F>(fVal));
 }
-
-template<int StartY, int EndY, int StartX, int EndX, class F>
-constexpr void constexprForUpperTriangleBase(F&& fVal) {
-    if constexpr (StartY < EndY) {
-        if constexpr (StartX < EndX) {
-            fVal(StartY, StartX);
-            constexprForUpperTriangleBase<StartY, EndY, StartX + 1, EndX>(std::forward<F>(fVal));
-        } else {
-            constexprForUpperTriangleBase<StartY + 1, EndY, StartY + 1, EndX>(std::forward<F>(fVal));
-        }
+template<int R, int C, class F>
+class constexprForUpperTriangleClassOneRow
+{
+public: 
+    static inline void execute(F&& fVal) {
+        constexprForUpperTriangleClassOneRow<R, C-1, F>::execute(std::forward<F>(fVal));
+        fVal(R, R + C - 1);
     }
-}
+};
 
-template<int MatrSize, class F>
+template<int R, class F>
+class constexprForUpperTriangleClassOneRow<R, 0, F>
+{
+public: 
+    static inline void execute(F&&) {}
+};
+
+template<int R, int D, class F>
+class constexprForUpperTriangleClass
+{
+public: 
+    static inline void execute(F&& fVal) {
+        constexprForUpperTriangleClass<R-1, D, F>::execute(std::forward<F>(fVal));
+        constexprForUpperTriangleClassOneRow<R-1, D-R+1, F>::execute(std::forward<F>(fVal));
+    }
+};
+
+template<int D, class F>
+class constexprForUpperTriangleClass<0, D, F>
+{
+public: 
+    static inline void execute(F&&) {}
+};
+
+template<int M, class F>
 constexpr void constexprForUpperTriangle(F&& fVal) {
-    constexprForUpperTriangleBase<0, MatrSize, 0, MatrSize>(fVal);
+    constexprForUpperTriangleClass<M,M,F>::execute(std::forward<F>(fVal));
 }
 
 template<int motionType>
 constexpr int hessianRowStart(int row) {
-    constexpr int NPARAMS = motionType == MOTION_HOMOGRAPHY ? 8 : 3;
-    if constexpr (motionType == MOTION_HOMOGRAPHY) {
-        constexpr std::array<int, NPARAMS> ROWSTART = {0, 8, 15, 21, 26, 30, 33, 35};
-        return ROWSTART[row];
-    } else {
-        constexpr std::array<int, NPARAMS> ROWSTART = {0, 3, 5};
-        return ROWSTART[row];
-    }
+    static_assert(true, "hessianRowStart: motion type is not supported.");
+    return -1;
+}
+ 
+constexpr int ROWSTARThomography[] = {0, 8, 15, 21, 26, 30, 33, 35};
+template<>
+constexpr int hessianRowStart<MOTION_HOMOGRAPHY>(int row) {
+    return ROWSTARThomography[row];
 }
 
+constexpr int ROWSTARTeuclidian[] = {0, 3, 5};
+template<>
+constexpr int hessianRowStart<MOTION_EUCLIDEAN>(int row) {
+    return ROWSTARTeuclidian[row];
+}
+
+template<int motionType>
+static void inline tailHandlerGetCoord(float& sx,
+                                       float& sy,
+                                       float& denominator,
+                                       int col, 
+                                       float numeratorX0,
+                                       float numeratorY0,
+                                       float denominator0,
+                                       float a00,
+                                       float a10,
+                                       float a20)
+{
+    static_assert(true, "tailHandlerGetCoord: motion type is not supported.");
+}
+
+template<>
+void inline tailHandlerGetCoord<MOTION_EUCLIDEAN>(float& sx,
+                                                  float& sy,
+                                                  float& denominator,
+                                                  int col, 
+                                                  float numeratorX0,
+                                                  float numeratorY0,
+                                                  float /*denominator0*/,
+                                                  float a00,
+                                                  float a10,
+                                                  float /*a20*/)
+{
+    denominator = 0;
+    sx = (numeratorX0 + a00 * col);
+    sy = (numeratorY0 + a10 * col);
+}
+
+template<>
+void inline tailHandlerGetCoord<MOTION_HOMOGRAPHY>(float& sx,
+                                                   float& sy,
+                                                   float& denominator,
+                                                   int col, 
+                                                   float numeratorX0,
+                                                   float numeratorY0,
+                                                   float denominator0,
+                                                   float a00,
+                                                   float a10,
+                                                   float a20)
+{
+    denominator = 1.f / (col * a20 + denominator0);
+    sx = (numeratorX0 + a00 * col) * denominator;
+    sy = (numeratorY0 + a10 * col) * denominator;
+}
+
+template<typename elemtype, int NPARAMS, int motionType>
+class fillJacobian
+{
+public: 
+    static constexpr std::array<float, NPARAMS> execute(int col, int row, float sx, float sy, float fVal, 
+                                                     const elemtype* samplePtr, float a00, float a10,
+                                                     float denominator) {
+        static_assert(true, "fillJacobian: motion type is not supported.");
+        return std::array<float, NPARAMS>();
+    }
+};
+
+template<typename elemtype, int NPARAMS>
+class fillJacobian<elemtype, NPARAMS, MOTION_EUCLIDEAN>
+{
+public: 
+    static constexpr std::array<float, NPARAMS> execute(int col, int row, float/*sx*/, float/*sy*/, float fVal, 
+                                                     const elemtype* samplePtr, float a00, float a10,
+                                                     float/*denominator*/) {
+        float gx = fVal * samplePtr[1], gy = fVal * samplePtr[2];
+        float hatX = -col * a10 - row * a00;
+        float hatY = col * a00 - row * a10;
+        float gz = gx * hatX + gy * hatY;
+        return std::array<float, NPARAMS>{gz, gx, gy};
+    }
+};
+
+template<typename elemtype, int NPARAMS>
+class fillJacobian<elemtype, NPARAMS, MOTION_HOMOGRAPHY>
+{
+public:
+    static constexpr std::array<float, NPARAMS> execute(int col, int row, float sx, float sy, float fVal, 
+                                                     const elemtype* samplePtr, float/*a00*/, float/*a10*/,
+                                                     float denominator) {
+        float gx = fVal * float(samplePtr[1]) * denominator;
+        float gy = fVal * float(samplePtr[2]) * denominator;
+        float gz = -(gx * sx + gy * sy);
+        return std::array<float, NPARAMS>{gx * col, gy * col, gz * col, gx * row, gy * row, gz * row, gx, gy};
+    }
+};
+
 template<int motionType, int NPARAMS, typename elemtype>
-inline void hessianTailHandler(int row,
+static inline void hessianTailHandler(int row,
                                int startx,
                                int wr,
                                int hs,
@@ -790,14 +921,9 @@ inline void hessianTailHandler(int row,
                                std::array<float, NPARAMS>& projSubCache,
                                double& correlationVal) {
     for (int col = startx; col < wr; col++) {
-        float sx = (numeratorX0 + a00 * col);
-        float sy = (numeratorY0 + a10 * col);
-        float denominator = 0;
-        if constexpr (motionType == MOTION_HOMOGRAPHY) {
-            denominator = 1.f / (col * a20 + denominator0);
-            sx *= denominator;
-            sy *= denominator;
-        }
+        float sx, sy, denominator;
+        tailHandlerGetCoord<motionType>(sx, sy, denominator, col, numeratorX0, numeratorY0,
+                                        denominator0, a00, a10, a20);
         unsigned int ix = saturate_cast<unsigned>(sx);
         unsigned int iy = saturate_cast<unsigned>(sy);
         if ((static_cast<int>(ix < (unsigned int)ws) & static_cast<int>(iy < (unsigned int)hs)) != 0) {
@@ -819,23 +945,13 @@ inline void hessianTailHandler(int row,
             nzMasked += fVal;
             sampMaskedSum += sampleVal;
             refMaskedSum += refVal;
-            std::array<float, NPARAMS> jac;
-            if constexpr (motionType == MOTION_HOMOGRAPHY) {
-                float gx = fVal * float(samplePtr[1]) * denominator;
-                float gy = fVal * float(samplePtr[2]) * denominator;
-                float gz = -(gx * sx + gy * sy);
-                jac = std::array<float, NPARAMS>{gx * col, gy * col, gz * col, gx * row, gy * row, gz * row, gx, gy};
-            } else {  // if constexpr (motionType == MOTION_EUCLIDEAN)MOTION_EUCLIDEAN
-                float gx = fVal * samplePtr[1], gy = fVal * samplePtr[2];
-                float hatX = -col * a10 - row * a00;
-                float hatY = col * a00 - row * a10;
-                float gz = gx * hatX + gy * hatY;
-                jac = std::array<float, NPARAMS>{gz, gx, gy};
-            }
-            constexprForUpperTriangle<NPARAMS>([&](int row, int col) {
-                hessPcache[hessianRowStart<motionType>(row) + (col - row)] += jac[row] * jac[col];
+            std::array<float, NPARAMS> jac = fillJacobian<elemtype, NPARAMS, motionType>::execute(col, row, sx, sy, 
+                                                                                                  fVal, samplePtr, a00,
+                                                                                                  a10, denominator);
+            constexprForUpperTriangle<NPARAMS>([&](int row_i, int col_i) {
+                hessPcache[hessianRowStart<motionType>(row_i) + (col_i - row_i)] += jac[row_i] * jac[col_i];
             });
-            constexprFor<0, NPARAMS>([&](int elem) {
+            constexprFor<NPARAMS>([&](int elem) {
                 iprojCache[elem] += jac[elem] * sampleVal;
                 tprojCache[elem] += jac[elem] * refVal;
                 projSubCache[elem] += jac[elem] * fVal;
@@ -846,7 +962,7 @@ inline void hessianTailHandler(int row,
 }
 
 template<int motionType, typename elemtype>
-double imageHessianProjECC(const Mat& map,
+static double imageHessianProjECC(const Mat& map,
                            const Mat& sampleWithGrad,
                            const Mat& ref,
                            double& sampSum,
@@ -918,7 +1034,7 @@ double imageHessianProjECC(const Mat& map,
     double a20 = 0;
     double a21 = 0;
     double a22 = 0;
-    if constexpr (motionType == MOTION_HOMOGRAPHY) {
+    if (motionType == MOTION_HOMOGRAPHY) {
         a20 = map.at<float>(2, 0);
         a21 = map.at<float>(2, 1);
         a22 = map.at<float>(2, 2);
@@ -942,10 +1058,7 @@ double imageHessianProjECC(const Mat& map,
 
             const float numeratorX0 = y * a01 + a02;
             const float numeratorY0 = y * a11 + a12;
-            float denominator0 = 0;
-            if constexpr (motionType == MOTION_HOMOGRAPHY) {
-                denominator0 = y * a21 + a22;
-            }
+            const float denominator0 = y * a21 + a22;
             int x = 0;
 
             hessianTailHandler<motionType, NPARAMS, elemtype>(y,
@@ -978,7 +1091,7 @@ double imageHessianProjECC(const Mat& map,
             constexprForUpperTriangle<NPARAMS>([&](int row, int col) {
                 hessPs[stripeNum][row * NPARAMS + col] += hessPcache[hessianRowStart<motionType>(row) + (col - row)];
             });
-            constexprFor<0, NPARAMS>([&](int elem) {
+            constexprFor<NPARAMS>([&](int elem) {
                 iprojs[stripeNum][elem] += iprojCache[elem];
                 tprojs[stripeNum][elem] += tprojCache[elem];
                 projSubs[stripeNum][elem] += projSubCache[elem];
@@ -1031,7 +1144,7 @@ double imageHessianProjECC(const Mat& map,
     return correlation;
 }
 
-void optimizeECC(Mat& sampleWithGrad,
+static void optimizeECC(Mat& sampleWithGrad,
                  const Mat& reference,
                  Mat& map,
                  int motionType,
@@ -1123,7 +1236,7 @@ void optimizeECC(Mat& sampleWithGrad,
     update_warping_matrix_ECC(map, deltaP, motionType);
 }
 
-Mat prepareGradients(const Mat& sample) {
+static Mat prepareGradients(const Mat& sample) {
     CV_Assert(sample.type() == CV_32FC2 || sample.type() == CV_16FC2);
 
     const int ws = sample.cols;
@@ -1160,7 +1273,7 @@ Mat prepareGradients(const Mat& sample) {
     return sampleWithGrad;
 }
 
-void runECC(const Mat& reference,
+static void runECC(const Mat& reference,
             const Mat& sample,
             Mat& map,
             int motionType,
@@ -1398,7 +1511,7 @@ double cv::findTransformECC2(const MatPyramid& referencePyramid,
                         const int motionType,
                         const TermCriteria criteria,
                         const std::vector<int>& itersPerLevel,
-                        const int gaussFiltSize,
+                        const int /*gaussFiltSize*/,
                         const int numberOfPyramidsLevel) {
     Mat& warpMatrix = warpMatrixA.getMatRef();
     std::vector<int> itersPerLevelCopy = itersPerLevel;
