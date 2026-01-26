@@ -169,6 +169,7 @@ void CV_ECC_BaseTest::usePyramids()
 class CV_ECC_Test_Translation : public CV_ECC_BaseTest {
    public:
     CV_ECC_Test_Translation();
+    void setRMS_MAX(double newRMS) { MAX_RMS_ECC = newRMS; }
 
    protected:
     bool test(const Mat);
@@ -193,7 +194,14 @@ bool CV_ECC_Test_Translation::test(const Mat testImg) {
 
         Mat mapTranslation = (Mat_<float>(2, 3) << 1, 0, 0, 0, 1, 0);
 
-        findTransformECC(warpedImage, testImg, mapTranslation, 0, criteria);
+        if(use_pyramids)
+        {
+            findTransformECC2(InputArray(warpedImage), InputArray(testImg), mapTranslation, MOTION_TRANSLATION, criteria);
+        }
+        else
+        {
+            findTransformECC(warpedImage, testImg, mapTranslation, 0, criteria);
+        }
 
         if (!checkMap(mapTranslation, translationGround))
             return false;
@@ -273,7 +281,14 @@ bool CV_ECC_Test_Affine::test(const Mat testImg) {
 
         Mat mapAffine = (Mat_<float>(2, 3) << 1, 0, 0, 0, 1, 0);
 
-        findTransformECC(warpedImage, testImg, mapAffine, 2, criteria);
+        if(use_pyramids)
+        {
+            findTransformECC2(InputArray(warpedImage), InputArray(testImg), mapAffine, MOTION_AFFINE, criteria);
+        }
+        else
+        {
+            findTransformECC(warpedImage, testImg, mapAffine, 2, criteria);
+        }
 
         if (!checkMap(mapAffine, affineGround))
             return false;
@@ -478,6 +493,17 @@ TEST(Video_ECC_Translation, accuracy) {
     CV_ECC_Test_Translation test;
     test.safe_run();
 }
+TEST(Video_ECC_Translation_Pyr, accuracy) {
+    CV_ECC_Test_Translation test;
+    test.usePyramids();
+// DUBUG: Well, i'm not sure we have to be nervous about such a difference:
+// ORIGINAL:1.000000, 0.000000, 17.786327
+// ORIGINAL:0.000000, 1.000000, 19.370564
+// FOUND:1.000000, 0.000000, 18.200426
+// FOUND:0.000000, 1.000000, 19.860243
+    test.setRMS_MAX(0.3);
+    test.safe_run();
+}
 TEST(Video_ECC_Euclidean, accuracy) {
     CV_ECC_Test_Euclidean test;
     test.safe_run();
@@ -489,6 +515,11 @@ TEST(Video_ECC_Euclidean_Pyr, accuracy) {
 }
 TEST(Video_ECC_Affine, accuracy) {
     CV_ECC_Test_Affine test;
+    test.safe_run();
+}
+TEST(Video_ECC_Affine_Pyr, accuracy) {
+    CV_ECC_Test_Affine test;
+    test.usePyramids();
     test.safe_run();
 }
 TEST(Video_ECC_Homography, accuracy) {

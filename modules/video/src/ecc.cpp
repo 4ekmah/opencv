@@ -720,6 +720,150 @@ double cv::findTransformECC(InputArray templateImage, InputArray inputImage, Inp
 
 
 //DUBUG: patch starts here:
+
+template<int motionType> struct MotionTraits {};
+
+template<> struct MotionTraits<MOTION_TRANSLATION> {
+    enum { paramAmount = 2 };
+    static inline void tail_handler_get_coord(float& sx,
+                                              float& sy,
+                                              float& denominator,
+                                              int col, 
+                                              float numeratorX0,
+                                              float numeratorY0,
+                                              float /*denominator0*/,
+                                              float /*a00*/,
+                                              float /*a10*/,
+                                              float /*a20*/)
+    {
+        denominator = 0;
+        sx = (numeratorX0 + col);
+        sy = numeratorY0;
+    }
+    template<typename elemtype> 
+    static constexpr std::array<float, paramAmount> fillJacobian(int /*col*/, int /*row*/, float/*sx*/, float/*sy*/, float fVal, 
+                                                     const elemtype* samplePtr, float /*a00*/, float /*a10*/,
+                                                     float/*denominator*/) {
+        float gx = fVal * samplePtr[1], gy = fVal * samplePtr[2];
+        return std::array<float, paramAmount>{gx, gy};
+    }
+    static inline void scale_warp_matrix(Mat& warpMatrix, float scale) {
+            warpMatrix.at<float>(0, 2) *= scale;
+            warpMatrix.at<float>(1, 2) *= scale;
+    }
+};
+
+template<> struct MotionTraits<MOTION_EUCLIDEAN> {
+    enum { paramAmount = 3 };
+    static inline void tail_handler_get_coord(float& sx,
+                                              float& sy,
+                                              float& denominator,
+                                              int col, 
+                                              float numeratorX0,
+                                              float numeratorY0,
+                                              float /*denominator0*/,
+                                              float a00,
+                                              float a10,
+                                              float /*a20*/)
+    {
+        denominator = 0;
+        sx = (numeratorX0 + a00 * col);
+        sy = (numeratorY0 + a10 * col);
+    }
+
+    template<typename elemtype> 
+    static constexpr std::array<float, paramAmount> fillJacobian(int col, int row, float/*sx*/, float/*sy*/, float fVal, 
+                                                     const elemtype* samplePtr, float a00, float a10,
+                                                     float/*denominator*/) {
+        float gx = fVal * samplePtr[1], gy = fVal * samplePtr[2];
+        float hatX = -col * a10 - row * a00;
+        float hatY = col * a00 - row * a10;
+        float gz = gx * hatX + gy * hatY;
+        return std::array<float, paramAmount>{gz, gx, gy};
+    }
+    static inline void scale_warp_matrix(Mat& warpMatrix, float scale) {
+            warpMatrix.at<float>(0, 2) *= scale;
+            warpMatrix.at<float>(1, 2) *= scale;
+    }
+};
+
+template<> struct MotionTraits<MOTION_AFFINE> {
+    enum { paramAmount = 6};
+    static inline void tail_handler_get_coord(float& sx,
+                                              float& sy,
+                                              float& denominator,
+                                              int col, 
+                                              float numeratorX0,
+                                              float numeratorY0,
+                                              float /*denominator0*/,
+                                              float a00,
+                                              float a10,
+                                              float /*a20*/)
+    {
+        denominator = 0;
+        sx = (numeratorX0 + a00 * col);
+        sy = (numeratorY0 + a10 * col);
+    }
+
+    template<typename elemtype> 
+    static constexpr std::array<float, paramAmount> fillJacobian(int col, int row, float/*sx*/, float/*sy*/, float fVal, 
+                                                     const elemtype* samplePtr, float /*a00*/, float /*a10*/,
+                                                     float/*denominator*/) {
+        float gx = fVal * samplePtr[1], gy = fVal * samplePtr[2];
+        return std::array<float, paramAmount>{gx * col, gy * col, gx * row, gy * row, gx, gy};
+    }
+    static inline void scale_warp_matrix(Mat& warpMatrix, float scale) {
+            warpMatrix.at<float>(0, 2) *= scale;
+            warpMatrix.at<float>(1, 2) *= scale;
+    }    
+};
+
+template<> struct MotionTraits<MOTION_HOMOGRAPHY> {
+    enum { paramAmount = 8};
+    static inline void tail_handler_get_coord(float& sx,
+                                              float& sy,
+                                              float& denominator,
+                                              int col, 
+                                              float numeratorX0,
+                                              float numeratorY0,
+                                              float denominator0,
+                                              float a00,
+                                              float a10,
+                                              float a20)
+    {
+        denominator = 1.f / (col * a20 + denominator0);
+        sx = (numeratorX0 + a00 * col) * denominator;
+        sy = (numeratorY0 + a10 * col) * denominator;
+    }
+    
+    template<typename elemtype> 
+    static constexpr std::array<float, paramAmount> fillJacobian(int col, int row, float sx, float sy, float fVal, 
+                                                     const elemtype* samplePtr, float/*a00*/, float/*a10*/,
+                                                     float denominator) {
+        float gx = fVal * float(samplePtr[1]) * denominator;
+        float gy = fVal * float(samplePtr[2]) * denominator;
+        float gz = -(gx * sx + gy * sy);
+        return std::array<float, paramAmount>{gx * col, gy * col, gz * col, gx * row, gy * row, gz * row, gx, gy};
+    }
+    static inline void scale_warp_matrix(Mat& warpMatrix, float scale) {
+        Mat invertScaleMat = Mat(3, 3, CV_32F, 0.f);
+        invertScaleMat.at<float>(0, 0) = 1.f / scale;
+        invertScaleMat.at<float>(1, 1) = 1.f / scale;
+        invertScaleMat.at<float>(2, 2) = 1.f;
+        Mat scaleMatrix = invertScaleMat.clone();
+        scaleMatrix.at<float>(0, 0) = scale;
+        scaleMatrix.at<float>(1, 1) = scale;
+        gemm(warpMatrix, invertScaleMat, 1., noArray(), 0., warpMatrix);
+        gemm(scaleMatrix, warpMatrix, 1., noArray(), 0., warpMatrix);
+        // Normalization, internal algorithms assumes, that a22 = 1.0f
+        for (int mel = 0; mel < 8; mel++) {
+            (reinterpret_cast<float*>(warpMatrix.data))[mel] /=
+                (reinterpret_cast<float*>(warpMatrix.data))[8];
+        }
+        (reinterpret_cast<float*>(warpMatrix.data))[8] = 1.f;
+    }
+};
+
 inline void reinterpret(Mat& mat, int newdepth) { 
     mat.flags = (mat.flags & ~CV_MAT_DEPTH_MASK) | newdepth;
 }
@@ -784,113 +928,10 @@ constexpr void constexpr_for_upper_triangle(F&& fVal) {
     constexprForUpperTriangleClass<M,M,F>::execute(std::forward<F>(fVal));
 }
 
-template<int motionType> //DUBUG: const calcluation!
+template<int MotionType>
 constexpr int hessian_row_start(int row) {
-    static_assert(true, "hessianRowStart: motion type is not supported.");
-    return -1;
+    return row == 0 ? 0 : (MotionTraits<MotionType>::paramAmount - row + 1 + hessian_row_start<MotionType>(row - 1));
 }
- 
-constexpr int ROWSTARThomography[] = {0, 8, 15, 21, 26, 30, 33, 35};
-template<>
-constexpr int hessian_row_start<MOTION_HOMOGRAPHY>(int row) {
-    return ROWSTARThomography[row];
-}
-
-constexpr int ROWSTARTeuclidian[] = {0, 3, 5};
-template<>
-constexpr int hessian_row_start<MOTION_EUCLIDEAN>(int row) {
-    return ROWSTARTeuclidian[row];
-}
-
-template<int motionType>
-static void inline tail_handler_get_coord(float& sx,
-                                       float& sy,
-                                       float& denominator,
-                                       int col, 
-                                       float numeratorX0,
-                                       float numeratorY0,
-                                       float denominator0,
-                                       float a00,
-                                       float a10,
-                                       float a20)
-{
-    static_assert(true, "tailHandlerGetCoord: motion type is not supported.");
-}
-
-template<>
-void inline tail_handler_get_coord<MOTION_EUCLIDEAN>(float& sx,
-                                                  float& sy,
-                                                  float& denominator,
-                                                  int col, 
-                                                  float numeratorX0,
-                                                  float numeratorY0,
-                                                  float /*denominator0*/,
-                                                  float a00,
-                                                  float a10,
-                                                  float /*a20*/)
-{
-    denominator = 0;
-    sx = (numeratorX0 + a00 * col);
-    sy = (numeratorY0 + a10 * col);
-}
-
-template<>
-void inline tail_handler_get_coord<MOTION_HOMOGRAPHY>(float& sx,
-                                                   float& sy,
-                                                   float& denominator,
-                                                   int col, 
-                                                   float numeratorX0,
-                                                   float numeratorY0,
-                                                   float denominator0,
-                                                   float a00,
-                                                   float a10,
-                                                   float a20)
-{
-    denominator = 1.f / (col * a20 + denominator0);
-    sx = (numeratorX0 + a00 * col) * denominator;
-    sy = (numeratorY0 + a10 * col) * denominator;
-}
-
-template<typename elemtype, int NPARAMS, int motionType>
-class fillJacobian
-{
-public: 
-    static constexpr std::array<float, NPARAMS> execute(int col, int row, float sx, float sy, float fVal, 
-                                                     const elemtype* samplePtr, float a00, float a10,
-                                                     float denominator) {
-        static_assert(true, "fillJacobian: motion type is not supported.");
-        return std::array<float, NPARAMS>();
-    }
-};
-
-template<typename elemtype, int NPARAMS>
-class fillJacobian<elemtype, NPARAMS, MOTION_EUCLIDEAN>
-{
-public: 
-    static constexpr std::array<float, NPARAMS> execute(int col, int row, float/*sx*/, float/*sy*/, float fVal, 
-                                                     const elemtype* samplePtr, float a00, float a10,
-                                                     float/*denominator*/) {
-        float gx = fVal * samplePtr[1], gy = fVal * samplePtr[2];
-        float hatX = -col * a10 - row * a00;
-        float hatY = col * a00 - row * a10;
-        float gz = gx * hatX + gy * hatY;
-        return std::array<float, NPARAMS>{gz, gx, gy};
-    }
-};
-
-template<typename elemtype, int NPARAMS>
-class fillJacobian<elemtype, NPARAMS, MOTION_HOMOGRAPHY>
-{
-public:
-    static constexpr std::array<float, NPARAMS> execute(int col, int row, float sx, float sy, float fVal, 
-                                                     const elemtype* samplePtr, float/*a00*/, float/*a10*/,
-                                                     float denominator) {
-        float gx = fVal * float(samplePtr[1]) * denominator;
-        float gy = fVal * float(samplePtr[2]) * denominator;
-        float gz = -(gx * sx + gy * sy);
-        return std::array<float, NPARAMS>{gx * col, gy * col, gz * col, gx * row, gy * row, gz * row, gx, gy};
-    }
-};
 
 template<int motionType, typename elemtype>
 static double image_hessian_proj_ECC(const Mat& map,
@@ -906,7 +947,7 @@ static double image_hessian_proj_ECC(const Mat& map,
                            Mat& refProj,
                            int deltaY) {
     static_assert(std::is_same<float, elemtype>::value);
-    constexpr int NPARAMS = motionType == MOTION_HOMOGRAPHY ? 8 : 3;
+    constexpr int NPARAMS = MotionTraits<motionType>::paramAmount;
 
     CV_Assert(map.type() == CV_32F);
     CV_Assert(hessian.type() == CV_32F && sampleProj.type() == CV_32F && refProj.type() == CV_32F);
@@ -993,7 +1034,7 @@ static double image_hessian_proj_ECC(const Mat& map,
             int x = 0;
             for (; x < wr; x++) { //Tail handler
                 float sx, sy, denominator;
-                tail_handler_get_coord<motionType>(sx, sy, denominator, x, numeratorX0, numeratorY0,
+                MotionTraits<motionType>::tail_handler_get_coord(sx, sy, denominator, x, numeratorX0, numeratorY0,
                                                 denominator0, a00, a10, a20);
                 unsigned int ix = saturate_cast<unsigned>(sx);
                 unsigned int iy = saturate_cast<unsigned>(sy);
@@ -1016,9 +1057,9 @@ static double image_hessian_proj_ECC(const Mat& map,
                     nzsMasked[stripeNum] += fVal;
                     sampMaskedSums[stripeNum] += sampleVal;
                     refMaskedSums[stripeNum] += refVal;
-                    std::array<float, NPARAMS> jac = fillJacobian<elemtype, NPARAMS, motionType>::execute(x, y, sx, sy, 
-                                                                                                        fVal, samplePtr, a00,
-                                                                                                        a10, denominator);
+                    std::array<float, NPARAMS> jac = MotionTraits<motionType>::fillJacobian(x, y, sx, sy, 
+                                                                                            fVal, samplePtr, a00,
+                                                                                            a10, denominator);
                     constexpr_for_upper_triangle<NPARAMS>([&](int row_i, int col_i) {
                         hessPcache[hessian_row_start<motionType>(row_i) + (col_i - row_i)] += jac[row_i] * jac[col_i];
                     });
@@ -1114,8 +1155,34 @@ static void optimize_ECC(Mat& sampleWithGrad,
     int nz;
 
     {  // if(imageWithGrad.type() == CV_32FC4)
-        if (motionType == MOTION_EUCLIDEAN) {
+        if (motionType == MOTION_TRANSLATION) {
+            correlation = image_hessian_proj_ECC<MOTION_TRANSLATION, float>(map,
+                                                                       sampleWithGrad,
+                                                                       reference,
+                                                                       sampSum,
+                                                                       sampSqSum,
+                                                                       referenceSum,
+                                                                       referenceSqSum,
+                                                                       nz,
+                                                                       hessian,
+                                                                       sampleProjection,
+                                                                       referenceProjection,
+                                                                       deltaY);
+        } else if (motionType == MOTION_EUCLIDEAN) {
             correlation = image_hessian_proj_ECC<MOTION_EUCLIDEAN, float>(map,
+                                                                       sampleWithGrad,
+                                                                       reference,
+                                                                       sampSum,
+                                                                       sampSqSum,
+                                                                       referenceSum,
+                                                                       referenceSqSum,
+                                                                       nz,
+                                                                       hessian,
+                                                                       sampleProjection,
+                                                                       referenceProjection,
+                                                                       deltaY);
+        } else if (motionType == MOTION_AFFINE) {
+            correlation = image_hessian_proj_ECC<MOTION_AFFINE, float>(map,
                                                                        sampleWithGrad,
                                                                        reference,
                                                                        sampSum,
@@ -1272,26 +1339,35 @@ static Mat splice_with_mask(const Mat& image, const Mat& mask) {
     return result;
 }
 
-static void scale_warp_matrix(Mat& warpMatrix, float scale) {
-    if (warpMatrix.rows == 3) {
-        Mat invertScaleMat = Mat(3, 3, CV_32F, 0.f);
-        invertScaleMat.at<float>(0, 0) = 1.f / scale;
-        invertScaleMat.at<float>(1, 1) = 1.f / scale;
-        invertScaleMat.at<float>(2, 2) = 1.f;
-        Mat scaleMatrix = invertScaleMat.clone();
-        scaleMatrix.at<float>(0, 0) = scale;
-        scaleMatrix.at<float>(1, 1) = scale;
-        gemm(warpMatrix, invertScaleMat, 1., noArray(), 0., warpMatrix);
-        gemm(scaleMatrix, warpMatrix, 1., noArray(), 0., warpMatrix);
-        // Normalization, internal algorithms assumes, that a22 = 1.0f
-        for (int mel = 0; mel < 8; mel++) {
-            (reinterpret_cast<float*>(warpMatrix.data))[mel] /=
-                (reinterpret_cast<float*>(warpMatrix.data))[8];
+static void scale_warp_matrix(Mat& warpMatrix, float scale, int motionType) {
+    switch (motionType) {
+        case MOTION_TRANSLATION: 
+        case MOTION_AFFINE:  //DUBUG: Well, just use specilized versions.
+        {
+            cv::Mat temp = Mat::eye(3, 3, CV_32FC1);
+            temp.at<float>(0,0) = warpMatrix.at<float>(0, 0);
+            temp.at<float>(0,1) = warpMatrix.at<float>(0, 1);
+            temp.at<float>(0,2) = warpMatrix.at<float>(0, 2);
+            temp.at<float>(1,0) = warpMatrix.at<float>(1, 0);
+            temp.at<float>(1,1) = warpMatrix.at<float>(1, 1);
+            temp.at<float>(1,2) = warpMatrix.at<float>(1, 2);
+            MotionTraits<MOTION_HOMOGRAPHY>::scale_warp_matrix(temp, scale);
+            warpMatrix.at<float>(0, 0) = temp.at<float>(0,0);
+            warpMatrix.at<float>(0, 1) = temp.at<float>(0,1);
+            warpMatrix.at<float>(0, 2) = temp.at<float>(0,2);
+            warpMatrix.at<float>(1, 0) = temp.at<float>(1,0);
+            warpMatrix.at<float>(1, 1) = temp.at<float>(1,1);
+            warpMatrix.at<float>(1, 2) = temp.at<float>(1,2);
+            break;
         }
-        (reinterpret_cast<float*>(warpMatrix.data))[8] = 1.f;
-    } else {
-        warpMatrix.at<float>(0, 2) *= scale;
-        warpMatrix.at<float>(1, 2) *= scale;
+        case MOTION_EUCLIDEAN:
+            MotionTraits<MOTION_EUCLIDEAN>::scale_warp_matrix(warpMatrix, scale);
+            break;
+        case MOTION_HOMOGRAPHY:
+            MotionTraits<MOTION_HOMOGRAPHY>::scale_warp_matrix(warpMatrix, scale);
+            break;
+        default:
+            CV_Error(Error::StsError, "Incorrect motion type");
     }
 }
 
@@ -1327,7 +1403,8 @@ static void check_params(const MatPyramid& referencePyramid,
         CV_Error(Error::BadImageSize, "warpMatrix has incorrect size");
     }
 
-    if (motionType != MOTION_HOMOGRAPHY && motionType != MOTION_EUCLIDEAN) {
+    if (motionType != MOTION_TRANSLATION && motionType != MOTION_EUCLIDEAN && 
+        motionType != MOTION_AFFINE && motionType != MOTION_HOMOGRAPHY) {
         CV_Error(Error::StsError, "Incorrect motion type");
     }
 
@@ -1447,16 +1524,16 @@ double cv::findTransformECC2(const MatPyramid& referencePyramid,
                 itersPerLevelCopy,
                 numberOfPyramidsLevel);
 
-    int nparams = 6;  // default: affine
+    int nparams = MotionTraits<MOTION_AFFINE>::paramAmount; // default
     switch (motionType) {
-        case MOTION_TRANSLATION:
-            nparams = 2;
+        case MOTION_TRANSLATION: 
+            nparams = MotionTraits<MOTION_TRANSLATION>::paramAmount;
             break;
         case MOTION_EUCLIDEAN:
-            nparams = 3;
+            nparams = MotionTraits<MOTION_EUCLIDEAN>::paramAmount;
             break;
         case MOTION_HOMOGRAPHY:
-            nparams = 8;
+            nparams = MotionTraits<MOTION_HOMOGRAPHY>::paramAmount;
             break;
     }
 
@@ -1467,7 +1544,7 @@ double cv::findTransformECC2(const MatPyramid& referencePyramid,
 
     // Scale warp matrix multiple times to lower pyramid level
     for (int pyrLevel = 0; pyrLevel < numberOfPyramidsLevel - 1; pyrLevel++) {
-        scale_warp_matrix(warpMatrix, 0.5);
+        scale_warp_matrix(warpMatrix, 0.5, motionType);
     }
     double rho = -1;
     for (int pyrLevel = numberOfPyramidsLevel - 1; pyrLevel >= 0; --pyrLevel) {
@@ -1484,7 +1561,7 @@ double cv::findTransformECC2(const MatPyramid& referencePyramid,
             optimize_ECC(sampleWithGrad, referencePyramid[pyrLevel], warpMatrix, motionType, &rho, &lastRho, deltaY, nparams);
         }
         if (pyrLevel > 0) {
-            scale_warp_matrix(warpMatrix, 2);
+            scale_warp_matrix(warpMatrix, 2, motionType);
         }
     }
     // return final correlation coefficient
