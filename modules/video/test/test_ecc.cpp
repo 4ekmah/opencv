@@ -195,13 +195,11 @@ bool CV_ECC_Test_Translation::test(const Mat testImg) {
         Mat mapTranslation = (Mat_<float>(2, 3) << 1, 0, 0, 0, 1, 0);
 
         if(use_pyramids)
-        {
-            findTransformECC2(InputArray(warpedImage), InputArray(testImg), mapTranslation, MOTION_TRANSLATION, criteria);
-        }
+        //DUBUG: I don't like at all this direct transformation to InputArray, but otherwise complier gets ambiguity.
+        //Seems, it have to be fixed with normal, distinguishable type for pyramids.
+            findTransformECCPyr(InputArray(warpedImage), InputArray(testImg), mapTranslation, MOTION_TRANSLATION, criteria);
         else
-        {
             findTransformECC(warpedImage, testImg, mapTranslation, 0, criteria);
-        }
 
         if (!checkMap(mapTranslation, translationGround))
             return false;
@@ -239,13 +237,9 @@ bool CV_ECC_Test_Euclidean::test(const Mat testImg) {
         Mat mapEuclidean = (Mat_<float>(2, 3) << 1, 0, 0, 0, 1, 0);
 
         if(use_pyramids)
-        {
-            findTransformECC2(InputArray(warpedImage), InputArray(testImg), mapEuclidean, MOTION_EUCLIDEAN, criteria);
-        }
+            findTransformECCPyr(InputArray(warpedImage), InputArray(testImg), mapEuclidean, MOTION_EUCLIDEAN, criteria);
         else
-        {
             findTransformECC(warpedImage, testImg, mapEuclidean, 1, criteria);
-        }
 
         if (!checkMap(mapEuclidean, euclideanGround))
             return false;
@@ -282,13 +276,9 @@ bool CV_ECC_Test_Affine::test(const Mat testImg) {
         Mat mapAffine = (Mat_<float>(2, 3) << 1, 0, 0, 0, 1, 0);
 
         if(use_pyramids)
-        {
-            findTransformECC2(InputArray(warpedImage), InputArray(testImg), mapAffine, MOTION_AFFINE, criteria);
-        }
+            findTransformECCPyr(InputArray(warpedImage), InputArray(testImg), mapAffine, MOTION_AFFINE, criteria);
         else
-        {
             findTransformECC(warpedImage, testImg, mapAffine, 2, criteria);
-        }
 
         if (!checkMap(mapAffine, affineGround))
             return false;
@@ -326,13 +316,9 @@ bool CV_ECC_Test_Homography::test(const Mat testImg) {
 
         Mat mapHomography = Mat::eye(3, 3, CV_32F);
         if(use_pyramids) 
-        {
-            findTransformECC2(InputArray(warpedImage), InputArray(testImg), mapHomography, MOTION_HOMOGRAPHY, criteria);
-        }
+            findTransformECCPyr(InputArray(warpedImage), InputArray(testImg), mapHomography, MOTION_HOMOGRAPHY, criteria);
         else
-        {
             findTransformECC(warpedImage, testImg, mapHomography, 3, criteria);
-        }
 
         if (!checkMap(mapHomography, homoGround))
             return false;
@@ -405,6 +391,62 @@ bool CV_ECC_Test_Mask::test(const Mat testImg) {
             return false;
     }
     return true;
+}
+
+class CV_ECC_PyrMaskTest : public cvtest::BaseTest {
+   public:
+    CV_ECC_PyrMaskTest() {}
+    virtual ~CV_ECC_PyrMaskTest() {}
+
+   protected:
+    void run(int);
+    double MAE_DUBUG(Mat& a, Mat& b);
+};
+
+void CV_ECC_PyrMaskTest::run(int)
+{
+    Mat largeGray0 = imread(string(ts->get_data_path()) + "shared/snils0.jpg", IMREAD_GRAYSCALE);
+    Mat largeGray1 = imread(string(ts->get_data_path()) + "shared/snils1.jpg", IMREAD_GRAYSCALE);
+    Mat glareMask0 = imread(string(ts->get_data_path()) + "shared/snils_mask0.png", IMREAD_GRAYSCALE);
+    Mat glareMask1 = imread(string(ts->get_data_path()) + "shared/snils_mask1.png", IMREAD_GRAYSCALE);
+    Mat expectedRes = imread(string(ts->get_data_path()) + "shared/snils_expected.jpg", IMREAD_GRAYSCALE);
+    if(largeGray0.empty() || largeGray1.empty() || glareMask0.empty() || glareMask1.empty() || expectedRes.empty())
+    {
+        ts->printf(ts->LOG, "test image can not be read");
+        ts->set_failed_test_info(cvtest::TS::FAIL_INVALID_TEST_DATA);
+        return;
+    }        
+
+    cv::Mat found = cv::Mat::eye(3, 3, CV_32F);
+    constexpr int nECCPyramidLevels = 6;
+    std::vector<int> itersPerLevel = {5, 5, 60, 80, 100, 1000};
+    constexpr int N_ITERS = 20;
+    constexpr double TERMINATION_EPS = 1e-9;
+    cv::TermCriteria crit(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, N_ITERS, TERMINATION_EPS);
+
+    findTransformECCPyr(largeGray0, largeGray1, found, MOTION_HOMOGRAPHY, crit, itersPerLevel, glareMask0, glareMask1, 5, nECCPyramidLevels);
+
+    cv::Mat warped;
+    cv::warpPerspective(largeGray0, warped, found, largeGray0.size(), cv::INTER_LINEAR, cv::BORDER_CONSTANT);
+    warped.convertTo(warped, CV_32F, 1.f / 255.f);
+    largeGray1.convertTo(largeGray1, CV_32F, 1.f / 255.f);
+    warped = (warped + largeGray1) * 0.5f;
+    warped.convertTo(warped, CV_8U, 255.f);
+    
+    EXPECT_NEAR(MAE_DUBUG(warped, expectedRes), 0.5, 0.1);        
+    ts->set_failed_test_info(cvtest::TS::OK);
+}
+
+double CV_ECC_PyrMaskTest::MAE_DUBUG(Mat& a, Mat& b)  //DUBUG: I hope, OpenCV have something like this...
+{
+    double res = 0;
+    int h = a.cols;
+    int w = a.rows;
+    uint8_t* ptr_a = a.data;
+    uint8_t* ptr_b = b.data;
+    for(int i = 0; i < h*w; i++)
+        res += std::fabs(ptr_a[i] - ptr_b[i]);
+    return res/(h*w);
 }
 
 void testECCProperties(Mat x, float eps) {
@@ -533,6 +575,11 @@ TEST(Video_ECC_Homography_Pyr, accuracy) {
 }
 TEST(Video_ECC_Mask, accuracy) {
     CV_ECC_Test_Mask test;
+    test.safe_run();
+}
+
+TEST(Video_ECC_Mask_Pyr, accuracy) {
+    CV_ECC_PyrMaskTest test;
     test.safe_run();
 }
 

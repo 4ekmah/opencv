@@ -420,12 +420,12 @@ CV_EXPORTS_W double findTransformECCWithMask( InputArray templateImage,
                                  int gaussFiltSize = 5 );
 
 
-typedef std::vector<cv::Mat> MatPyramid; //DUBUG: delete it from here!!!
+typedef std::vector<cv::Mat> MatPyramid; //DUBUG: Well, i don't know, what standart type to use for pyramid representation.
 
 /** @brief Prepares pyramid for ECC algorithm(pyramids variation). Can be used for economy with
 burst algorithms or iterative approaches.
 
-@param image Single channel source image for pyramid; CV_8U, CV_16U, CV_32F, CV_64F type. //DUBUG: ORLY?
+@param image Single channel source image for pyramid; CV_8U, CV_16U, CV_32F, CV_64F type.
 @param imageMask An optional single channel mask to indicate valid values of sample. CV_8U.
 Can be empty. In this case the mask will be created automatically and filled with 255 in
 each pixel.
@@ -502,11 +502,11 @@ an exception if algorithm does not converges.
 @sa
 computeECC, estimateAffine2D, estimateAffinePartial2D, findHomography
 */
-CV_EXPORTS_W double findTransformECC2(InputArray reference, //DUBUG: 2? Use normal name!
-                        InputArray sample,
+CV_EXPORTS_W double findTransformECCPyr(InputArray reference, //DUBUG: There was a problems with overriding types, I decided to use alternative name. Not sure, of course...
+                        InputArray sample,                    //Also, please review types, used for input matricies.
                         InputOutputArray warpMatrix,
-                        const int motionType,
-                        const cv::TermCriteria criteria,
+                        const int motionType = MOTION_AFFINE,
+                        const cv::TermCriteria criteria = TermCriteria(TermCriteria::COUNT + TermCriteria::EPS, 50, 1e-6),
                         const std::vector<int>& itersPerLevel = std::vector<int>(),
                         InputArray referenceMask = cv::Mat(),
                         InputArray sampleMask = cv::Mat(),
@@ -569,11 +569,11 @@ an exception if algorithm does not converges.
 computeECC, estimateAffine2D, estimateAffinePartial2D, findHomography
 */
 
-CV_EXPORTS_W double findTransformECC2(const MatPyramid& referencePyramid,
+CV_EXPORTS_W double findTransformECCPyr(const MatPyramid& referencePyramid,
                         InputArray sample,
                         InputOutputArray warpMatrix,
-                        const int motionType,
-                        const cv::TermCriteria criteria,
+                        const int motionType = MOTION_AFFINE,
+                        const cv::TermCriteria criteria = TermCriteria(TermCriteria::COUNT + TermCriteria::EPS, 50, 1e-6),
                         const std::vector<int>& itersPerLevel = std::vector<int>(),
                         InputArray sampleMask = cv::Mat(),
                         const int gaussFiltSize = 5,
@@ -636,11 +636,11 @@ an exception if algorithm does not converges.
 computeECC, estimateAffine2D, estimateAffinePartial2D, findHomography
 */
 
-CV_EXPORTS_W double findTransformECC2(InputArray reference,
+CV_EXPORTS_W double findTransformECCPyr(InputArray reference,
                         const MatPyramid& samplePyramid,
                         InputOutputArray warpMatrix,
-                        const int motionType,
-                        const cv::TermCriteria criteria,
+                        const int motionType = MOTION_AFFINE,
+                        const cv::TermCriteria criteria = TermCriteria(TermCriteria::COUNT + TermCriteria::EPS, 50, 1e-6),
                         const std::vector<int>& itersPerLevel = std::vector<int>(),
                         InputArray referenceMask = cv::Mat(),
                         const int gaussFiltSize = 5,
@@ -701,11 +701,11 @@ an exception if algorithm does not converges.
 @sa
 computeECC, estimateAffine2D, estimateAffinePartial2D, findHomography
 */
-CV_EXPORTS_W double findTransformECC2(const MatPyramid& referencePyramid,
+CV_EXPORTS_W double findTransformECCPyr(const MatPyramid& referencePyramid,
                         const MatPyramid& samplePyramid,
                         InputOutputArray warpMatrix,
-                        const int motionType,
-                        const cv::TermCriteria criteria,
+                        const int motionType = MOTION_AFFINE,
+                        const cv::TermCriteria criteria = TermCriteria(TermCriteria::COUNT + TermCriteria::EPS, 50, 1e-6),
                         const std::vector<int>& itersPerLevel = std::vector<int>(),
                         const int gaussFiltSize = 5,
                         const int numberOfPyramidsLevel = 4);

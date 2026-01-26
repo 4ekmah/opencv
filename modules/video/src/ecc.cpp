@@ -628,99 +628,7 @@ double cv::findTransformECC(InputArray templateImage, InputArray inputImage, Inp
     // Use default value of 5 for gaussFiltSize to maintain backward compatibility.
     return findTransformECC(templateImage, inputImage, warpMatrix, motionType, criteria, inputMask, 5);
 }
-
-/* End of file. */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-//DUBUG: patch starts here:
-
+// =============================== PYRAMIDAL VERSION OF GRAYSCALE ECC ================================
 template<int motionType> struct MotionTraits {};
 
 template<> struct MotionTraits<MOTION_TRANSLATION> {
@@ -746,10 +654,6 @@ template<> struct MotionTraits<MOTION_TRANSLATION> {
                                                      float/*denominator*/) {
         float gx = fVal * samplePtr[1], gy = fVal * samplePtr[2];
         return std::array<float, paramAmount>{gx, gy};
-    }
-    static inline void scale_warp_matrix(Mat& warpMatrix, float scale) {
-            warpMatrix.at<float>(0, 2) *= scale;
-            warpMatrix.at<float>(1, 2) *= scale;
     }
 };
 
@@ -781,10 +685,6 @@ template<> struct MotionTraits<MOTION_EUCLIDEAN> {
         float gz = gx * hatX + gy * hatY;
         return std::array<float, paramAmount>{gz, gx, gy};
     }
-    static inline void scale_warp_matrix(Mat& warpMatrix, float scale) {
-            warpMatrix.at<float>(0, 2) *= scale;
-            warpMatrix.at<float>(1, 2) *= scale;
-    }
 };
 
 template<> struct MotionTraits<MOTION_AFFINE> {
@@ -812,10 +712,6 @@ template<> struct MotionTraits<MOTION_AFFINE> {
         float gx = fVal * samplePtr[1], gy = fVal * samplePtr[2];
         return std::array<float, paramAmount>{gx * col, gy * col, gx * row, gy * row, gx, gy};
     }
-    static inline void scale_warp_matrix(Mat& warpMatrix, float scale) {
-            warpMatrix.at<float>(0, 2) *= scale;
-            warpMatrix.at<float>(1, 2) *= scale;
-    }    
 };
 
 template<> struct MotionTraits<MOTION_HOMOGRAPHY> {
@@ -844,23 +740,6 @@ template<> struct MotionTraits<MOTION_HOMOGRAPHY> {
         float gy = fVal * float(samplePtr[2]) * denominator;
         float gz = -(gx * sx + gy * sy);
         return std::array<float, paramAmount>{gx * col, gy * col, gz * col, gx * row, gy * row, gz * row, gx, gy};
-    }
-    static inline void scale_warp_matrix(Mat& warpMatrix, float scale) {
-        Mat invertScaleMat = Mat(3, 3, CV_32F, 0.f);
-        invertScaleMat.at<float>(0, 0) = 1.f / scale;
-        invertScaleMat.at<float>(1, 1) = 1.f / scale;
-        invertScaleMat.at<float>(2, 2) = 1.f;
-        Mat scaleMatrix = invertScaleMat.clone();
-        scaleMatrix.at<float>(0, 0) = scale;
-        scaleMatrix.at<float>(1, 1) = scale;
-        gemm(warpMatrix, invertScaleMat, 1., noArray(), 0., warpMatrix);
-        gemm(scaleMatrix, warpMatrix, 1., noArray(), 0., warpMatrix);
-        // Normalization, internal algorithms assumes, that a22 = 1.0f
-        for (int mel = 0; mel < 8; mel++) {
-            (reinterpret_cast<float*>(warpMatrix.data))[mel] /=
-                (reinterpret_cast<float*>(warpMatrix.data))[8];
-        }
-        (reinterpret_cast<float*>(warpMatrix.data))[8] = 1.f;
     }
 };
 
@@ -1339,35 +1218,26 @@ static Mat splice_with_mask(const Mat& image, const Mat& mask) {
     return result;
 }
 
-static void scale_warp_matrix(Mat& warpMatrix, float scale, int motionType) {
-    switch (motionType) {
-        case MOTION_TRANSLATION: 
-        case MOTION_AFFINE:  //DUBUG: Well, just use specilized versions.
-        {
-            cv::Mat temp = Mat::eye(3, 3, CV_32FC1);
-            temp.at<float>(0,0) = warpMatrix.at<float>(0, 0);
-            temp.at<float>(0,1) = warpMatrix.at<float>(0, 1);
-            temp.at<float>(0,2) = warpMatrix.at<float>(0, 2);
-            temp.at<float>(1,0) = warpMatrix.at<float>(1, 0);
-            temp.at<float>(1,1) = warpMatrix.at<float>(1, 1);
-            temp.at<float>(1,2) = warpMatrix.at<float>(1, 2);
-            MotionTraits<MOTION_HOMOGRAPHY>::scale_warp_matrix(temp, scale);
-            warpMatrix.at<float>(0, 0) = temp.at<float>(0,0);
-            warpMatrix.at<float>(0, 1) = temp.at<float>(0,1);
-            warpMatrix.at<float>(0, 2) = temp.at<float>(0,2);
-            warpMatrix.at<float>(1, 0) = temp.at<float>(1,0);
-            warpMatrix.at<float>(1, 1) = temp.at<float>(1,1);
-            warpMatrix.at<float>(1, 2) = temp.at<float>(1,2);
-            break;
+static void scale_warp_matrix(Mat& warpMatrix, float scale) {
+    if (warpMatrix.rows == 3) {
+        Mat invertScaleMat = Mat(3, 3, CV_32F, 0.f);
+        invertScaleMat.at<float>(0, 0) = 1.f / scale;
+        invertScaleMat.at<float>(1, 1) = 1.f / scale;
+        invertScaleMat.at<float>(2, 2) = 1.f;
+        Mat scaleMatrix = invertScaleMat.clone();
+        scaleMatrix.at<float>(0, 0) = scale;
+        scaleMatrix.at<float>(1, 1) = scale;
+        gemm(warpMatrix, invertScaleMat, 1., noArray(), 0., warpMatrix);
+        gemm(scaleMatrix, warpMatrix, 1., noArray(), 0., warpMatrix);
+        // Normalization, internal algorithms assumes, that a22 = 1.0f
+        for (int mel = 0; mel < 8; mel++) {
+            (reinterpret_cast<float*>(warpMatrix.data))[mel] /=
+                (reinterpret_cast<float*>(warpMatrix.data))[8];
         }
-        case MOTION_EUCLIDEAN:
-            MotionTraits<MOTION_EUCLIDEAN>::scale_warp_matrix(warpMatrix, scale);
-            break;
-        case MOTION_HOMOGRAPHY:
-            MotionTraits<MOTION_HOMOGRAPHY>::scale_warp_matrix(warpMatrix, scale);
-            break;
-        default:
-            CV_Error(Error::StsError, "Incorrect motion type");
+        (reinterpret_cast<float*>(warpMatrix.data))[8] = 1.f;
+    } else {
+        warpMatrix.at<float>(0, 2) *= scale;
+        warpMatrix.at<float>(1, 2) *= scale;
     }
 }
 
@@ -1436,7 +1306,7 @@ MatPyramid cv::prepareECCPyramid(InputArray image,
     return imagePyramid;
 }
 
-double cv::findTransformECC2(InputArray reference,
+double cv::findTransformECCPyr(InputArray reference,
                         InputArray sample,
                         InputOutputArray warpMatrix,
                         const int motionType,
@@ -1448,7 +1318,7 @@ double cv::findTransformECC2(InputArray reference,
                         const int numberOfPyramidsLevel) {
     MatPyramid referencePyramid =
         prepareECCPyramid(reference, referenceMask, gaussFiltSize, numberOfPyramidsLevel);
-    return findTransformECC2(referencePyramid,
+    return findTransformECCPyr(referencePyramid,
                             sample,
                             warpMatrix,
                             motionType,
@@ -1459,7 +1329,7 @@ double cv::findTransformECC2(InputArray reference,
                             numberOfPyramidsLevel);
 }
 
-double cv::findTransformECC2(const MatPyramid& referencePyramid,
+double cv::findTransformECCPyr(const MatPyramid& referencePyramid,
                         InputArray sample,
                         InputOutputArray warpMatrix,
                         const int motionType,
@@ -1469,7 +1339,7 @@ double cv::findTransformECC2(const MatPyramid& referencePyramid,
                         const int gaussFiltSize,
                         const int numberOfPyramidsLevel) {
     MatPyramid samplePyramid = prepareECCPyramid(sample, sampleMask, gaussFiltSize, numberOfPyramidsLevel);
-    return findTransformECC2(referencePyramid,
+    return findTransformECCPyr(referencePyramid,
                             samplePyramid,
                             warpMatrix,
                             motionType,
@@ -1479,7 +1349,7 @@ double cv::findTransformECC2(const MatPyramid& referencePyramid,
                             numberOfPyramidsLevel);
 }
 
-double cv::findTransformECC2(InputArray reference,
+double cv::findTransformECCPyr(InputArray reference,
                         const MatPyramid& samplePyramid,
                         InputOutputArray warpMatrix,
                         const int motionType,
@@ -1490,7 +1360,7 @@ double cv::findTransformECC2(InputArray reference,
                         const int numberOfPyramidsLevel) {
     MatPyramid referencePyramid =
         prepareECCPyramid(reference, referenceMask, gaussFiltSize, numberOfPyramidsLevel);
-    return findTransformECC2(referencePyramid,
+    return findTransformECCPyr(referencePyramid,
                             samplePyramid,
                             warpMatrix,
                             motionType,
@@ -1500,7 +1370,7 @@ double cv::findTransformECC2(InputArray reference,
                             numberOfPyramidsLevel);
 }
 
-double cv::findTransformECC2(const MatPyramid& referencePyramid,
+double cv::findTransformECCPyr(const MatPyramid& referencePyramid,
                         const MatPyramid& samplePyramid,
                         InputOutputArray warpMatrixA,
                         const int motionType,
@@ -1544,7 +1414,7 @@ double cv::findTransformECC2(const MatPyramid& referencePyramid,
 
     // Scale warp matrix multiple times to lower pyramid level
     for (int pyrLevel = 0; pyrLevel < numberOfPyramidsLevel - 1; pyrLevel++) {
-        scale_warp_matrix(warpMatrix, 0.5, motionType);
+        scale_warp_matrix(warpMatrix, 0.5);
     }
     double rho = -1;
     for (int pyrLevel = numberOfPyramidsLevel - 1; pyrLevel >= 0; --pyrLevel) {
@@ -1561,9 +1431,10 @@ double cv::findTransformECC2(const MatPyramid& referencePyramid,
             optimize_ECC(sampleWithGrad, referencePyramid[pyrLevel], warpMatrix, motionType, &rho, &lastRho, deltaY, nparams);
         }
         if (pyrLevel > 0) {
-            scale_warp_matrix(warpMatrix, 2, motionType);
+            scale_warp_matrix(warpMatrix, 2);
         }
     }
     // return final correlation coefficient
     return rho;
 }
+/* End of file. */
