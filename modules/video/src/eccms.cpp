@@ -47,7 +47,8 @@
 
 using namespace cv;
 
-// =============================== PYRAMIDAL VERSION OF GRAYSCALE ECC ================================
+typedef std::vector<cv::Mat> MatPyramid; //DUBUG: Well, i don't know, what standart type to use for pyramid representation.
+
 template<int motionType> struct MotionTraits {};
 
 template<> struct MotionTraits<MOTION_TRANSLATION> {
@@ -757,7 +758,7 @@ static void check_params(const MatPyramid& referencePyramid,
     }
 }
 
-MatPyramid cv::prepareECCPyramid(InputArray image,
+static MatPyramid prepareECCPyramid(InputArray image,
                              InputArray imageMask,  // Can be empty
                              int gaussFiltSize,
                              int numberOfPyramidsLevel) {
@@ -776,84 +777,20 @@ MatPyramid cv::prepareECCPyramid(InputArray image,
     return imagePyramid;
 }
 
-double cv::findTransformECCPyr(InputArray reference,
+double cv::findTransformECCMultiscale(InputArray reference,
                         InputArray sample,
-                        InputOutputArray warpMatrix,
-                        const int motionType,
-                        const TermCriteria criteria,
-                        const std::vector<int>& itersPerLevel,
-                        InputArray referenceMask,
-                        InputArray sampleMask,
-                        const int gaussFiltSize,
-                        const int numberOfPyramidsLevel) {
-    MatPyramid referencePyramid =
-        prepareECCPyramid(reference, referenceMask, gaussFiltSize, numberOfPyramidsLevel);
-    return findTransformECCPyr(referencePyramid,
-                            sample,
-                            warpMatrix,
-                            motionType,
-                            criteria,
-                            itersPerLevel,
-                            sampleMask,
-                            gaussFiltSize,
-                            numberOfPyramidsLevel);
-}
-
-double cv::findTransformECCPyr(const MatPyramid& referencePyramid,
-                        InputArray sample,
-                        InputOutputArray warpMatrix,
-                        const int motionType,
-                        const TermCriteria criteria,
-                        const std::vector<int>& itersPerLevel,
-                        InputArray sampleMask,
-                        const int gaussFiltSize,
-                        const int numberOfPyramidsLevel) {
-    MatPyramid samplePyramid = prepareECCPyramid(sample, sampleMask, gaussFiltSize, numberOfPyramidsLevel);
-    return findTransformECCPyr(referencePyramid,
-                            samplePyramid,
-                            warpMatrix,
-                            motionType,
-                            criteria,
-                            itersPerLevel,
-                            gaussFiltSize,
-                            numberOfPyramidsLevel);
-}
-
-double cv::findTransformECCPyr(InputArray reference,
-                        const MatPyramid& samplePyramid,
-                        InputOutputArray warpMatrix,
-                        const int motionType,
-                        const TermCriteria criteria,
-                        const std::vector<int>& itersPerLevel,
-                        InputArray referenceMask,
-                        const int gaussFiltSize,
-                        const int numberOfPyramidsLevel) {
-    MatPyramid referencePyramid =
-        prepareECCPyramid(reference, referenceMask, gaussFiltSize, numberOfPyramidsLevel);
-    return findTransformECCPyr(referencePyramid,
-                            samplePyramid,
-                            warpMatrix,
-                            motionType,
-                            criteria,
-                            itersPerLevel,
-                            gaussFiltSize,
-                            numberOfPyramidsLevel);
-}
-
-double cv::findTransformECCPyr(const MatPyramid& referencePyramid,
-                        const MatPyramid& samplePyramid,
                         InputOutputArray warpMatrixA,
-                        const int motionType,
-                        const TermCriteria criteria,
-                        const std::vector<int>& itersPerLevel,
-                        const int /*gaussFiltSize*/,
-                        const int numberOfPyramidsLevel) {
+                        const ECCParameters& eccParams,
+                        InputArray referenceMask,
+                        InputArray sampleMask) {
+    MatPyramid referencePyramid = prepareECCPyramid(reference, referenceMask, eccParams.gaussFiltSize, eccParams.numberOfPyramidsLevel);
+    MatPyramid samplePyramid = prepareECCPyramid(sample, sampleMask, eccParams.gaussFiltSize, eccParams.numberOfPyramidsLevel);
     Mat& warpMatrix = warpMatrixA.getMatRef();
-    std::vector<int> itersPerLevelCopy = itersPerLevel;
+    std::vector<int> itersPerLevelCopy = eccParams.itersPerLevel;
     // If the user passed an un-initialized warpMatrix, initialize to identity
     if (warpMatrix.empty())
     {
-        int rowCount = motionType == MOTION_HOMOGRAPHY ? 3 : 2;
+        int rowCount = eccParams.motionType == MOTION_HOMOGRAPHY ? 3 : 2;
         warpMatrix = Mat::eye(rowCount, 3, CV_64FC1);
     }
     int warpMatrixType = warpMatrix.type();
@@ -865,13 +802,13 @@ double cv::findTransformECCPyr(const MatPyramid& referencePyramid,
     check_params(referencePyramid,
                 samplePyramid,
                 warpMatrix,
-                motionType,
-                criteria,
+                eccParams.motionType,
+                eccParams.criteria,
                 itersPerLevelCopy,
-                numberOfPyramidsLevel);
+                eccParams.numberOfPyramidsLevel);
 
     int nparams = MotionTraits<MOTION_AFFINE>::paramAmount; // default
-    switch (motionType) {
+    switch (eccParams.motionType) {
         case MOTION_TRANSLATION: 
             nparams = MotionTraits<MOTION_TRANSLATION>::paramAmount;
             break;
@@ -883,17 +820,17 @@ double cv::findTransformECCPyr(const MatPyramid& referencePyramid,
             break;
     }
 
-    const std::vector<int> numberOfIterations = ((criteria.type & TermCriteria::COUNT) != 0)
+    const std::vector<int> numberOfIterations = ((eccParams.criteria.type & TermCriteria::COUNT) != 0)
                                                     ? itersPerLevelCopy
-                                                    : std::vector<int>(numberOfPyramidsLevel, 200);
-    const double terminationEPS = (bool)(criteria.type & TermCriteria::EPS) ? criteria.epsilon : -1;
+                                                    : std::vector<int>(eccParams.numberOfPyramidsLevel, 200);
+    const double terminationEPS = (bool)(eccParams.criteria.type & TermCriteria::EPS) ? eccParams.criteria.epsilon : -1;
 
     // Scale warp matrix multiple times to lower pyramid level
-    for (int pyrLevel = 0; pyrLevel < numberOfPyramidsLevel - 1; pyrLevel++) {
+    for (int pyrLevel = 0; pyrLevel < eccParams.numberOfPyramidsLevel - 1; pyrLevel++) {
         scale_warp_matrix(warpMatrix, 0.5);
     }
     double rho = -1;
-    for (int pyrLevel = numberOfPyramidsLevel - 1; pyrLevel >= 0; --pyrLevel) {
+    for (int pyrLevel = eccParams.numberOfPyramidsLevel - 1; pyrLevel >= 0; --pyrLevel) {
         const int hr = referencePyramid[pyrLevel].rows;
 
         Mat sampleWithGrad = prepare_gradients(samplePyramid[pyrLevel]);
@@ -904,7 +841,7 @@ double cv::findTransformECCPyr(const MatPyramid& referencePyramid,
         // iteratively update mapMatrix
         double lastRho = -terminationEPS;
         for (int i = 1; (i <= numberOfIterations[pyrLevel]) && (fabs(rho - lastRho) >= terminationEPS); i++) {
-            optimize_ECC(sampleWithGrad, referencePyramid[pyrLevel], warpMatrix, motionType, &rho, &lastRho, deltaY, nparams);
+            optimize_ECC(sampleWithGrad, referencePyramid[pyrLevel], warpMatrix, eccParams.motionType, &rho, &lastRho, deltaY, nparams);
         }
         if (pyrLevel > 0) {
             scale_warp_matrix(warpMatrix, 2);

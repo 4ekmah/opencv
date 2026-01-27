@@ -72,13 +72,13 @@ PERF_TEST_P(ECCPerfTest, findTransformECC,
     }
 }
 
-PERF_TEST_P(ECCPerfTestPyr, findTransformECCPyr,
+PERF_TEST_P(ECCPerfTestPyr, findTransformECCMultiscale,
             testing::Combine(testing::Values(MOTION_TRANSLATION, MOTION_EUCLIDEAN, MOTION_AFFINE, MOTION_HOMOGRAPHY),
                              testing::Values(false, true))) {
     int transform_type = get<0>(GetParam());
     bool pyramidFlag = get<1>(GetParam());
 
-    Mat img = imread(getDataPath("cv/shared/snils0.jpg"), IMREAD_GRAYSCALE);
+    Mat img = imread(getDataPath("cv/shared/3MP.png"), IMREAD_GRAYSCALE);
     Mat templateImage;
 
     Mat warpMat;
@@ -114,9 +114,11 @@ PERF_TEST_P(ECCPerfTestPyr, findTransformECCPyr,
             warpMat = Mat::eye(3, 3, CV_32F);
 
         if(pyramidFlag) {
-            findTransformECCPyr(InputArray(templateImage), InputArray(img), warpMat, transform_type,
-                            TermCriteria(TermCriteria::COUNT + TermCriteria::EPS, 5, -1),
-                            std::vector<int>(), Mat(), Mat(), 5, 1);
+            ECCParameters params;
+            params.criteria = cv::TermCriteria(TermCriteria::COUNT + TermCriteria::EPS, 5, -1);
+            params.motionType = transform_type;
+            params.itersPerLevel = {1, 2, 2, 2};
+            findTransformECCMultiscale(templateImage, img, warpMat, params);
         }
         else {
             findTransformECC(templateImage, img, warpMat, transform_type,
@@ -124,17 +126,5 @@ PERF_TEST_P(ECCPerfTestPyr, findTransformECCPyr,
         }
     }
     SANITY_CHECK_NOTHING();
-
-    // if (transform_type == MOTION_HOMOGRAPHY)
-    // {
-    //     // NOTE: for Mac M1 + KleidiCV
-    //     // ECCPerfTest_findTransformECC.findTransformECC/6, where GetParam() = (MOTION_HOMOGRAPHY, IMREAD_GRAYSCALE)
-    //     SANITY_CHECK(warpMat, 8.3e-3);
-    // }
-    // else
-    // {
-    //     SANITY_CHECK(warpMat, 3e-3);
-    // }
 }
-
 }  // namespace opencv_test

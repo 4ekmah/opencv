@@ -195,9 +195,12 @@ bool CV_ECC_Test_Translation::test(const Mat testImg) {
         Mat mapTranslation = (Mat_<float>(2, 3) << 1, 0, 0, 0, 1, 0);
 
         if(use_pyramids)
-        //DUBUG: I don't like at all this direct transformation to InputArray, but otherwise complier gets ambiguity.
-        //Seems, it have to be fixed with normal, distinguishable type for pyramids.
-            findTransformECCPyr(InputArray(warpedImage), InputArray(testImg), mapTranslation, MOTION_TRANSLATION, criteria);
+        {
+            ECCParameters params;
+            params.criteria = criteria;
+            params.motionType = MOTION_TRANSLATION;
+            findTransformECCMultiscale(warpedImage, testImg, mapTranslation, params);
+        }
         else
             findTransformECC(warpedImage, testImg, mapTranslation, 0, criteria);
 
@@ -237,7 +240,12 @@ bool CV_ECC_Test_Euclidean::test(const Mat testImg) {
         Mat mapEuclidean = (Mat_<float>(2, 3) << 1, 0, 0, 0, 1, 0);
 
         if(use_pyramids)
-            findTransformECCPyr(InputArray(warpedImage), InputArray(testImg), mapEuclidean, MOTION_EUCLIDEAN, criteria);
+        {
+            ECCParameters params;
+            params.criteria = criteria;
+            params.motionType = MOTION_EUCLIDEAN;
+            findTransformECCMultiscale(warpedImage, testImg, mapEuclidean, params);
+        }
         else
             findTransformECC(warpedImage, testImg, mapEuclidean, 1, criteria);
 
@@ -276,7 +284,12 @@ bool CV_ECC_Test_Affine::test(const Mat testImg) {
         Mat mapAffine = (Mat_<float>(2, 3) << 1, 0, 0, 0, 1, 0);
 
         if(use_pyramids)
-            findTransformECCPyr(InputArray(warpedImage), InputArray(testImg), mapAffine, MOTION_AFFINE, criteria);
+        {
+            ECCParameters params;
+            params.criteria = criteria;
+            params.motionType = MOTION_AFFINE;
+            findTransformECCMultiscale(warpedImage, testImg, mapAffine, params);
+        }
         else
             findTransformECC(warpedImage, testImg, mapAffine, 2, criteria);
 
@@ -316,7 +329,12 @@ bool CV_ECC_Test_Homography::test(const Mat testImg) {
 
         Mat mapHomography = Mat::eye(3, 3, CV_32F);
         if(use_pyramids) 
-            findTransformECCPyr(InputArray(warpedImage), InputArray(testImg), mapHomography, MOTION_HOMOGRAPHY, criteria);
+        {
+            ECCParameters params;
+            params.criteria = criteria;
+            params.motionType = MOTION_HOMOGRAPHY;
+            findTransformECCMultiscale(warpedImage, testImg, mapHomography, params);
+        }
         else
             findTransformECC(warpedImage, testImg, mapHomography, 3, criteria);
 
@@ -407,10 +425,10 @@ void CV_ECC_PyrMaskTest::run(int)
 {
     Mat largeGray0 = imread(string(ts->get_data_path()) + "shared/snils0.jpg", IMREAD_GRAYSCALE);
     Mat largeGray1 = imread(string(ts->get_data_path()) + "shared/snils1.jpg", IMREAD_GRAYSCALE);
-    Mat glareMask0 = imread(string(ts->get_data_path()) + "shared/snils_mask0.png", IMREAD_GRAYSCALE);
-    Mat glareMask1 = imread(string(ts->get_data_path()) + "shared/snils_mask1.png", IMREAD_GRAYSCALE);
+    Mat roiMask0 = imread(string(ts->get_data_path()) + "shared/snils_mask0.png", IMREAD_GRAYSCALE);
+    Mat roiMask1 = imread(string(ts->get_data_path()) + "shared/snils_mask1.png", IMREAD_GRAYSCALE);
     Mat expectedRes = imread(string(ts->get_data_path()) + "shared/snils_expected.jpg", IMREAD_GRAYSCALE);
-    if(largeGray0.empty() || largeGray1.empty() || glareMask0.empty() || glareMask1.empty() || expectedRes.empty())
+    if(largeGray0.empty() || largeGray1.empty() || roiMask0.empty() || roiMask1.empty() || expectedRes.empty())
     {
         ts->printf(ts->LOG, "test image can not be read");
         ts->set_failed_test_info(cvtest::TS::FAIL_INVALID_TEST_DATA);
@@ -418,13 +436,14 @@ void CV_ECC_PyrMaskTest::run(int)
     }        
 
     cv::Mat found = cv::Mat::eye(3, 3, CV_32F);
-    constexpr int nECCPyramidLevels = 6;
-    std::vector<int> itersPerLevel = {5, 5, 60, 80, 100, 1000};
     constexpr int N_ITERS = 20;
     constexpr double TERMINATION_EPS = 1e-9;
-    cv::TermCriteria crit(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, N_ITERS, TERMINATION_EPS);
-
-    findTransformECCPyr(largeGray0, largeGray1, found, MOTION_HOMOGRAPHY, crit, itersPerLevel, glareMask0, glareMask1, 5, nECCPyramidLevels);
+    ECCParameters params;
+    params.criteria = cv::TermCriteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, N_ITERS, TERMINATION_EPS);
+    params.motionType = MOTION_HOMOGRAPHY;
+    params.numberOfPyramidsLevel = 6;
+    params.itersPerLevel = {5, 5, 60, 80, 100, 1000};
+    findTransformECCMultiscale(largeGray0, largeGray1, found, params, roiMask0, roiMask1);
 
     cv::Mat warped;
     cv::warpPerspective(largeGray0, warped, found, largeGray0.size(), cv::INTER_LINEAR, cv::BORDER_CONSTANT);
