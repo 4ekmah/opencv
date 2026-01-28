@@ -280,13 +280,6 @@ static double image_hessian_proj_ECC(const Mat& map,
     std::vector<Vec<double, NPARAMS> > projSubs(stripesAmount);
     std::vector<double> correlations(stripesAmount, 0.);
 
-    // There is sophisticated story with masked and unmasked sums. We don't understand it for well,
-    // but for some reason, in case, we are using masks algorithm becomes unstable if we apply masks
-    // on images for calculationg all sums. Working solution is to use masks for hessians, projections,
-    // correlations and not to use masks for simple statistics, like mean and standart deviation. In
-    // the same time we need to calculate masked versions of mean and number of used pixels to
-    // calculate correlation. So, we need pairs, like sampSums and sampMaskedSums or nzs and nzsMasked.
-
     std::vector<double> sampSums(stripesAmount, 0);
     std::vector<double> sampSqSums(stripesAmount, 0);
     std::vector<double> refSums(stripesAmount, 0);
@@ -294,7 +287,6 @@ static double image_hessian_proj_ECC(const Mat& map,
     std::vector<int> nzs(stripesAmount, 0);
     std::vector<double> sampMaskedSums(stripesAmount, 0);
     std::vector<double> refMaskedSums(stripesAmount, 0);
-    std::vector<int> nzsMasked(stripesAmount, 0);
 
     double a00 = map.at<double>(0, 0);
     double a01 = map.at<double>(0, 1);
@@ -341,19 +333,15 @@ static double image_hessian_proj_ECC(const Mat& map,
                     const elemtype* samplePtr = samplePtr0 + iy * (ws * 4) + ix * 4;
                     float sampleVal = samplePtr[0];
                     float refVal = refPtr[2 * x];
+                    float fVal = float(samplePtr[3]) == 0.f ? 0.f : 1.f;
+                    fVal *= float(refPtr[2 * x + 1]) == 0.f ? 0.f : 1.f;
+                    sampleVal *= fVal;
+                    refVal *= fVal;
                     sampSums[stripeIdx] += sampleVal;
                     sampSqSums[stripeIdx] += sampleVal * sampleVal;
                     refSums[stripeIdx] += refVal;
                     refSqSums[stripeIdx] += refVal * refVal;
-                    nzs[stripeIdx]++;
-                    float fVal = float(samplePtr[3]);
-                    float fValRef = float(refPtr[2 * x + 1]);
-                    fVal = fVal == 0.f ? 0.f : 1.f;
-                    fValRef = fValRef == 0.f ? 0.f : 1.f;
-                    fVal *= fValRef;
-                    sampleVal *= fVal;
-                    refVal *= fVal;
-                    nzsMasked[stripeIdx] += fVal;
+                    nzs[stripeIdx] += fVal;
                     sampMaskedSums[stripeIdx] += sampleVal;
                     refMaskedSums[stripeIdx] += refVal;
                     std::array<float, NPARAMS> jac = MotionTraits<motionType>::fillJacobian(x, y, sx, sy, 
@@ -385,7 +373,6 @@ static double image_hessian_proj_ECC(const Mat& map,
     double refMaskedSum = 0;
     double correlation = 0;
     sampSum = sampSqSum = refSum = refSqSum = nz = 0;
-    int nzMasked = 0;
 
     for (int stripeIdx = 0; stripeIdx < stripesAmount; stripeIdx++) {
         correlation += correlations[stripeIdx];
@@ -396,12 +383,11 @@ static double image_hessian_proj_ECC(const Mat& map,
         sampMaskedSum += sampMaskedSums[stripeIdx];
         refMaskedSum += refMaskedSums[stripeIdx];
         nz += nzs[stripeIdx];
-        nzMasked += nzsMasked[stripeIdx];
     }
     double scale = nz == 0 ? 0. : 1. / nz;
     double sampMean = sampSum * scale;
     double refMean = refSum * scale;
-    correlation += nzMasked * sampMean * refMean - sampMaskedSum * refMean - refMaskedSum * sampMean;
+    correlation += nz * sampMean * refMean - sampMaskedSum * refMean - refMaskedSum * sampMean;
     double* hessPtr = hessian.ptr<double>(0);
     double* sampleProjPtr = sampleProj.ptr<double>(0);
     double* refProjPtr = refProj.ptr<double>(0);

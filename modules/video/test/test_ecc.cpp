@@ -411,24 +411,40 @@ bool CV_ECC_Test_Mask::test(const Mat testImg) {
     return true;
 }
 
-class CV_ECC_PyrMaskTest : public cvtest::BaseTest {
+class CV_ECC_BigPictureTest : public CV_ECC_BaseTest {
    public:
-    CV_ECC_PyrMaskTest() {}
-    virtual ~CV_ECC_PyrMaskTest() {}
-
+    CV_ECC_BigPictureTest() : masked_version(false) {}
+    virtual ~CV_ECC_BigPictureTest() {}
+    void maskedVersion() { masked_version = true; } 
    protected:
     void run(int);
-    double MAE_DUBUG(Mat& a, Mat& b);
+    bool masked_version;
 };
 
-void CV_ECC_PyrMaskTest::run(int)
+void CV_ECC_BigPictureTest::run(int)
 {
-    Mat largeGray0 = imread(string(ts->get_data_path()) + "shared/snils0.jpg", IMREAD_GRAYSCALE);
-    Mat largeGray1 = imread(string(ts->get_data_path()) + "shared/snils1.jpg", IMREAD_GRAYSCALE);
-    Mat roiMask0 = imread(string(ts->get_data_path()) + "shared/snils_mask0.png", IMREAD_GRAYSCALE);
-    Mat roiMask1 = imread(string(ts->get_data_path()) + "shared/snils_mask1.png", IMREAD_GRAYSCALE);
-    Mat expectedRes = imread(string(ts->get_data_path()) + "shared/snils_expected.jpg", IMREAD_GRAYSCALE);
-    if(largeGray0.empty() || largeGray1.empty() || roiMask0.empty() || roiMask1.empty() || expectedRes.empty())
+    Mat largeGray0 = imread(string(ts->get_data_path()) + "shared/halmosh0.jpg", IMREAD_GRAYSCALE);
+    Mat largeGray1;
+    Mat roiMask0;
+    Mat roiMask1;
+    Mat expectedRes;
+    bool readError = false;
+    if(masked_version)
+    {
+        largeGray1 = imread(string(ts->get_data_path()) + "shared/halmosh2.jpg", IMREAD_GRAYSCALE);
+        roiMask0 = imread(string(ts->get_data_path()) + "shared/halmosh0mask.png", IMREAD_GRAYSCALE);
+        roiMask1 = imread(string(ts->get_data_path()) + "shared/halmosh2mask.png", IMREAD_GRAYSCALE);
+        readError = largeGray0.empty() || largeGray1.empty() || roiMask0.empty() || roiMask1.empty();
+        expectedRes = (Mat_<float>(3, 3) << 1.0303, 0.0618, -65.2214, -0.0456, 1.0373, 21.188, 5.9e-06, 1.5e-06, 1);
+    }
+    else
+    {
+        largeGray1 = imread(string(ts->get_data_path()) + "shared/halmosh1.jpg", IMREAD_GRAYSCALE);
+        readError = largeGray0.empty() || largeGray1.empty();
+        expectedRes = (Mat_<float>(3, 3) << 0.9751, -0.0323, 52.094, 0.0123, 0.9802, 16.9658, -1.14e-05, -4.55e-06, 1);
+    }
+    
+    if(readError)
     {
         ts->printf(ts->LOG, "test image can not be read");
         ts->set_failed_test_info(cvtest::TS::FAIL_INVALID_TEST_DATA);
@@ -437,35 +453,15 @@ void CV_ECC_PyrMaskTest::run(int)
 
     cv::Mat found = cv::Mat::eye(3, 3, CV_32F);
     constexpr int N_ITERS = 20;
-    constexpr double TERMINATION_EPS = 1e-9;
+    constexpr double TERMINATION_EPS = 1e-6;
     ECCParameters params;
     params.criteria = cv::TermCriteria(cv::TermCriteria::COUNT + cv::TermCriteria::EPS, N_ITERS, TERMINATION_EPS);
     params.motionType = MOTION_HOMOGRAPHY;
     params.numberOfPyramidsLevel = 6;
-    params.itersPerLevel = {5, 5, 60, 80, 100, 1000};
+    params.itersPerLevel = {5, 10, 300, 300, 1000, 1000};
     findTransformECCMultiscale(largeGray0, largeGray1, found, params, roiMask0, roiMask1);
-
-    cv::Mat warped;
-    cv::warpPerspective(largeGray0, warped, found, largeGray0.size(), cv::INTER_LINEAR, cv::BORDER_CONSTANT);
-    warped.convertTo(warped, CV_32F, 1.f / 255.f);
-    largeGray1.convertTo(largeGray1, CV_32F, 1.f / 255.f);
-    warped = (warped + largeGray1) * 0.5f;
-    warped.convertTo(warped, CV_8U, 255.f);
-    
-    EXPECT_NEAR(MAE_DUBUG(warped, expectedRes), 0.5, 0.1);        
+    ASSERT_EQ(checkMap(found, expectedRes), true);
     ts->set_failed_test_info(cvtest::TS::OK);
-}
-
-double CV_ECC_PyrMaskTest::MAE_DUBUG(Mat& a, Mat& b)  //DUBUG: I hope, OpenCV have something like this...
-{
-    double res = 0;
-    int h = a.cols;
-    int w = a.rows;
-    uint8_t* ptr_a = a.data;
-    uint8_t* ptr_b = b.data;
-    for(int i = 0; i < h*w; i++)
-        res += std::fabs(ptr_a[i] - ptr_b[i]);
-    return res/(h*w);
 }
 
 void testECCProperties(Mat x, float eps) {
@@ -596,11 +592,14 @@ TEST(Video_ECC_Mask, accuracy) {
     CV_ECC_Test_Mask test;
     test.safe_run();
 }
-
-TEST(Video_ECC_Mask_Pyr, accuracy) {
-    CV_ECC_PyrMaskTest test;
+TEST(Video_ECC_BigPyr, accuracy) {
+    CV_ECC_BigPictureTest test;
     test.safe_run();
 }
-
+TEST(Video_ECC_BigPyr_Mask, accuracy) {
+    CV_ECC_BigPictureTest test;
+    test.maskedVersion();
+    test.safe_run();
+}
 }  // namespace
 }  // namespace opencv_test
